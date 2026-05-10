@@ -1,0 +1,164 @@
+# =============================================================================
+# hifisampler 全平台自动构建 (GitHub Actions)
+#
+# 参考 OpenUtau CI 结构，适配 PyInstaller Python 项目。
+# 手动触发时可指定版本号、是否为正式发布等。
+#
+# 产物:
+#   Windows CPU  → hifiserver_cpu.exe   → hifiserver-win-x64-{version}.zip
+#   Linux x64    → hifiserver_linux     → hifiserver-linux-x64-{version}.zip
+#   macOS ARM    → hifiserver_macos     → hifiserver-osx-arm64-{version}.zip
+# =============================================================================
+
+name: Build hifisampler
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version"
+        default: "0.0.0"
+        required: true
+        type: string
+      release:
+        type: boolean
+        default: false
+        description: "Release"
+      beta:
+        type: boolean
+        default: true
+        description: "Beta"
+      draft:
+        type: boolean
+        default: true
+        description: "Draft"
+
+env:
+  release-name: ${{ inputs.version }}${{ inputs.beta && ' Beta' || '' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_cpu.spec,  output: hifiserver_cpu }
+          - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: hifiserver_linux.spec, output: hifiserver_linux }
+          - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: hifiserver_macos.spec, output: hifiserver_macos }
+
+    runs-on: ${{ matrix.arch.runs-on }}
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. 检出代码（含 Git LFS 模型文件）──
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      # ── 2. 设置 Python ──
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ── 3. 系统级依赖 ──
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libsndfile1
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libsndfile
+
+      # ── 4. UPX（仅 Windows 需要下载）─
+      - name: Install UPX (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          curl -sL https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-win64.zip -o upx.zip
+          Expand-Archive upx.zip -DestinationPath .
+          echo "$pwd/upx-4.2.4-win64" >> $env:GITHUB_PATH
+
+      # ── 5. Python 依赖 ──
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install -r requirements.txt
+
+      # ── 6. PyInstaller 打包 ──
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller ${{ matrix.arch.spec }} `
+            --distpath dist `
+            --workpath build-${{ runner.os }} `
+            --noconfirm
+
+      # ── 7. 数据目录整理 ──
+      - name: Move data folders out of _internal
+        shell: pwsh
+        run: |
+          $outDir = "dist\${{ matrix.arch.output }}"
+          $internal = Join-Path $outDir "_internal"
+          if (Test-Path $internal) {
+            @("hnsep_onnx", "exported_onnx_v2") | ForEach-Object {
+              $src = Join-Path $internal $_
+              $dst = Join-Path $outDir $_
+              if (Test-Path $src -PathType Container) {
+                if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+                Move-Item -Path $src -Destination $dst
+                Write-Output "Moved $_ to $dst"
+              }
+            }
+          }
+
+      # ── 8. 打包压缩 ──
+      - name: Package (Windows → .zip)
+        if: matrix.arch.os == 'win'
+        shell: pwsh
+        run: |
+          cd dist\${{ matrix.arch.output }}
+          7z a -r ..\..\hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.zip *
+
+      - name: Package (Unix → .zip)
+        if: matrix.arch.os != 'win'
+        shell: bash
+        run: |
+          cd dist/${{ matrix.arch.output }}
+          zip -r ../../hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.zip .
+
+      # ── 9. 上传 Artifact ──
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}
+          path: hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.*
+          if-no-files-found: error
+
+      # ── 10. Release ──
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: ${{ inputs.release }}
+        with:
+          tag_name: ${{ inputs.version }}
+          name: ${{ env.release-name }}
+          prerelease: ${{ inputs.beta }}
+          draft: ${{ inputs.draft }}
+          files: |
+            hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.*
+          body: |
+            ## hifiserver ${{ inputs.version }}
+
+            | 平台 | 文件 | 说明 |
+            |------|------|------|
+            | 🪟 Windows | `hifiserver-win-x64-${{ inputs.version }}.zip` | CPU 推理 |
+            | 🐧 Linux | `hifiserver-linux-x64-${{ inputs.version }}.zip` | CPU 推理 |
+            | 🍎 macOS | `hifiserver-osx-arm64-${{ inputs.version }}.zip` | CPU 推理 (Apple Silicon) |
+
+            > 解压后直接运行对应平台的可执行文件即可启动 HTTP 服务。
+            >
+            > **注意**: 只有【zhCVVC和zh某不能说音素器】支持自适应音量 PHTP 的自动设置。
+            > 支持参数: GWL, TENC, BREC, VOIC, VEL, VOL, PHTP, GENC
