@@ -1,0 +1,227 @@
+# =============================================================================
+# hifisampler 全平台自动构建 (GitHub Actions)
+#
+# 在 push / tag / 手动触发时，同时在 Windows / Linux / macOS 上
+# 用 PyInstaller 打包独立可执行文件，并上传为 Artifact。
+#
+# 产物:
+#   Windows CPU  → hifiserver-windows-cpu   / hifiserver_cpu.exe
+#   Windows DML  → hifiserver-windows-dml   / hifiserver_dml.exe
+#   Linux        → hifiserver-linux          / hifiserver_linux
+#   macOS        → hifiserver-macos          / hifiserver_macos
+# =============================================================================
+
+name: Build hifisampler
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:        # 支持手动触发
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false      # 一个平台失败不影响其他平台
+      matrix:
+        include:
+          - os: windows-latest
+            spec: hifiserver_cpu.spec
+            artifact_name: hifiserver-windows-cpu
+            display_name: Windows CPU
+            extra_pip: ""
+            install_upx: true
+
+          - os: windows-latest
+            spec: hifiserver_dml.spec
+            artifact_name: hifiserver-windows-dml
+            display_name: Windows DML
+            extra_pip: "onnxruntime-directml"
+            install_upx: true
+
+          - os: ubuntu-latest
+            spec: hifiserver_linux.spec
+            artifact_name: hifiserver-linux
+            display_name: Linux
+            extra_pip: ""
+            install_upx: false     # ubuntu-latest 自带 upx
+
+          - os: macos-latest
+            spec: hifiserver_macos.spec
+            artifact_name: hifiserver-macos
+            display_name: macOS
+            extra_pip: ""
+            install_upx: false     # macos spec 已关闭 upx
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. 检出代码 ──────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. 设置 Python ────────────────────────────────────────────────
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'            # 缓存 pip 依赖加速构建
+          cache-dependency-path: requirements.txt
+
+      # ── 3. 系统级依赖 ────────────────────────────────────────────────
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libsndfile1  # soundfile 需要
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install libsndfile
+
+      # ── 4. UPX（压缩可执行文件，仅 Windows）──────────────────────────
+      - name: Install UPX (Windows)
+        if: matrix.install_upx && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # 下载 UPX 并解压到 PATH
+          curl -sL https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-win64.zip -o upx.zip
+          Expand-Archive upx.zip -DestinationPath .
+          echo "$pwd/upx-4.2.4-win64" >> $env:GITHUB_PATH
+
+      # ── 5. Python 依赖 ────────────────────────────────────────────────
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install -r requirements.txt
+
+      - name: Install platform-specific packages
+        if: matrix.extra_pip != ''
+        run: |
+          pip install ${{ matrix.extra_pip }}
+
+      # ── 6. PyInstaller 打包 ──────────────────────────────────────────
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller ${{ matrix.spec }} `
+            --distpath dist `
+            --workpath build-${{ runner.os }} `
+            --noconfirm
+        shell: pwsh   # PowerShell 统一换行符
+
+      # ── 7. 数据目录整理 ──────────────────────────────────────────────
+      # PyInstaller 可能把 datas 放在 _internal 下，移到外面方便使用
+      - name: Organize output directories
+        shell: pwsh
+        run: |
+          # 找到 dist 下的输出目录（根据 spec 中的 name 字段）
+          $distDirs = Get-ChildItem -Path dist -Directory
+          foreach ($dir in $distDirs) {
+            $internalPath = Join-Path $dir.FullName "_internal"
+            if (Test-Path $internalPath) {
+              # 移动 hnsep_onnx
+              $src = Join-Path $internalPath "hnsep_onnx"
+              $dst = Join-Path $dir.FullName "hnsep_onnx"
+              if (Test-Path $src -PathType Container) {
+                if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+                Move-Item -Path $src -Destination $dst
+                Write-Output "Moved hnsep_onnx to $dst"
+              }
+              # 移动 exported_onnx_v2
+              $src = Join-Path $internalPath "exported_onnx_v2"
+              $dst = Join-Path $dir.FullName "exported_onnx_v2"
+              if (Test-Path $src -PathType Container) {
+                if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+                Move-Item -Path $src -Destination $dst
+                Write-Output "Moved exported_onnx_v2 to $dst"
+              }
+            }
+          }
+
+      # ── 8. 验证产物 ──────────────────────────────────────────────────
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          Write-Output "=== Build artifacts for ${{ matrix.display_name }} ==="
+          Get-ChildItem -Path dist -Recurse -Depth 1 | Select-Object Mode, Length, Name | Format-Table -AutoSize
+
+      # ── 9. 上传 Artifact ──────────────────────────────────────────────
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/*/
+          if-no-files-found: error
+          compression-level: 6    # 压缩小一点，加快上传
+
+  # ── 10. Release（仅对 tag 推送）──────────────────────────────────────
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create release archives
+        shell: bash
+        run: |
+          cd release-artifacts
+
+          # Windows CPU → zip
+          if [ -d "hifiserver-windows-cpu" ]; then
+            cd hifiserver-windows-cpu
+            zip -r ../hifiserver-windows-cpu.zip .
+            cd ..
+          fi
+
+          # Windows DML → zip
+          if [ -d "hifiserver-windows-dml" ]; then
+            cd hifiserver-windows-dml
+            zip -r ../hifiserver-windows-dml.zip .
+            cd ..
+          fi
+
+          # Linux → tar.gz
+          if [ -d "hifiserver-linux" ]; then
+            tar czf hifiserver-linux.tar.gz hifiserver-linux
+          fi
+
+          # macOS → tar.gz
+          if [ -d "hifiserver-macos" ]; then
+            tar czf hifiserver-macos.tar.gz hifiserver-macos
+          fi
+
+          # 清理原始目录
+          rm -rf hifiserver-*/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: hifisampler ${{ github.ref_name }}
+          body: |
+            ## hifisampler ${{ github.ref_name }}
+
+            全平台自动构建产物：
+
+            | 平台 | 文件 | 说明 |
+            |------|------|------|
+            | 🪟 Windows CPU | `hifiserver-windows-cpu.zip` | ONNX CPU 推理 |
+            | 🪟 Windows DML | `hifiserver-windows-dml.zip` | ONNX DML (GPU) 推理 |
+            | 🐧 Linux | `hifiserver-linux.tar.gz` | ONNX CPU 推理 |
+            | 🍎 macOS | `hifiserver-macos.tar.gz` | ONNX CPU 推理 |
+
+            > 解压后直接运行对应平台的可执行文件即可启动 HTTP 服务。
+          files: release-artifacts/*.zip
+          draft: false
+          prerelease: false
