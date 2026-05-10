@@ -5,9 +5,9 @@
 # 手动触发时可指定版本号、是否为正式发布等。
 #
 # 产物:
-#   Windows CPU  → hifiserver_cpu.exe   → hifisampler-win-x64-{version}.zip
-#   Linux x64    → hifiserver_linux     → hifisampler-linux-x64-{version}.tar.gz
-#   macOS ARM    → hifiserver_macos     → hifisampler-osx-arm64-{version}.tar.gz
+#   Windows CPU  → hifiserver_cpu.exe   → hifiserver-win-x64-{version}.zip
+#   Linux x64    → hifiserver_linux     → hifiserver-linux-x64-{version}.zip
+#   macOS ARM    → hifiserver_macos     → hifiserver-osx-arm64-{version}.zip
 # =============================================================================
 
 name: Build hifisampler
@@ -119,20 +119,21 @@ jobs:
         shell: pwsh
         run: |
           cd dist\${{ matrix.arch.output }}
-          7z a -r ..\..\hifisampler-${{ matrix.arch.name }}-${{ inputs.version }}.zip *
+          7z a -r ..\..\hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.zip *
 
-      - name: Package (Unix → .tar.gz)
+      - name: Package (Unix → .zip)
         if: matrix.arch.os != 'win'
+        shell: bash
         run: |
           cd dist/${{ matrix.arch.output }}
-          tar -czf ../../hifisampler-${{ matrix.arch.name }}-${{ inputs.version }}.tar.gz *
+          zip -r ../../hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.zip .
 
       # ── 9. 上传 Artifact ──
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hifisampler-${{ matrix.arch.name }}-${{ inputs.version }}
-          path: hifisampler-${{ matrix.arch.name }}-${{ inputs.version }}.*
+          name: hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}
+          path: hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.*
           if-no-files-found: error
 
       # ── 10. Release ──
@@ -145,15 +146,15 @@ jobs:
           prerelease: ${{ inputs.beta }}
           draft: ${{ inputs.draft }}
           files: |
-            hifisampler-${{ matrix.arch.name }}-${{ inputs.version }}.*
+            hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.*
           body: |
-            ## hifisampler ${{ inputs.version }}
+            ## hifiserver ${{ inputs.version }}
 
             | 平台 | 文件 | 说明 |
             |------|------|------|
-            | 🪟 Windows | `hifisampler-win-x64-${{ inputs.version }}.zip` | CPU 推理 |
-            | 🐧 Linux | `hifisampler-linux-x64-${{ inputs.version }}.tar.gz` | CPU 推理 |
-            | 🍎 macOS | `hifisampler-osx-arm64-${{ inputs.version }}.tar.gz` | CPU 推理 (Apple Silicon) |
+            | 🪟 Windows | `hifiserver-win-x64-${{ inputs.version }}.zip` | CPU 推理 |
+            | 🐧 Linux | `hifiserver-linux-x64-${{ inputs.version }}.zip` | CPU 推理 |
+            | 🍎 macOS | `hifiserver-osx-arm64-${{ inputs.version }}.zip` | CPU 推理 (Apple Silicon) |
 
             > 解压后直接运行对应平台的可执行文件即可启动 HTTP 服务。
             >
