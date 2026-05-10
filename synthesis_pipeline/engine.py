@@ -10,9 +10,6 @@ from synthesis_pipeline.fragment import Fragment
 from synthesis_pipeline.post_process import apply_hnsep_postprocess
 from synthesis_pipeline.growl import apply_growl
 from synthesis_pipeline.utils import resample_array
-from synthesis_pipeline.formant_shifter import (
-    parse_formant_flags, has_formant_shift, shift_formants_with_hnsep,
-)
 
 
 class SynthesisEngine:
@@ -116,29 +113,6 @@ class SynthesisEngine:
                 _pad(frag.tension, front_dh, tail_dh),
                 _pad(frag.voicing, front_dh, tail_dh),
                 frag.sample_rate, self._hnsep
-            )
-
-        # ── 6b. 共振峰偏移（F1~F4 独立控制，从 Note_flags 读取） ──
-        # 格式: f1=1.15, f2=0.85 等；取所有音素中第一个非默认值
-        _formant_shifts = {}  # 收集所有音素的共振峰参数
-        for info in frag.phoneme_list:
-            flags = info.get('Note_flags', {})
-            parsed = parse_formant_flags(flags)
-            if has_formant_shift(parsed):
-                for k in ('f1', 'f2', 'f3', 'f4'):
-                    if k not in _formant_shifts:
-                        _formant_shifts[k] = parsed[k]
-        if _formant_shifts:
-            # 补齐未设置的值
-            f1r = _formant_shifts.get('f1', 1.0)
-            f2r = _formant_shifts.get('f2', 1.0)
-            f3r = _formant_shifts.get('f3', 1.0)
-            f4r = _formant_shifts.get('f4', 1.0)
-            print(f"共振峰偏移: F1={f1r:.3f} F2={f2r:.3f} F3={f3r:.3f} F4={f4r:.3f}")
-            wav = shift_formants_with_hnsep(
-                wav, frag.sample_rate,
-                f1_ratio=f1r, f2_ratio=f2r, f3_ratio=f3r, f4_ratio=f4r,
-                hnsep_session=self._hnsep,
             )
 
         # ── 7. 咆哮效果（所有参数之后，最后一步） ──
