@@ -1,0 +1,6 @@
+hop_length: 512
+is_mono: true
+n_fft: 2048
+n_out: 32
+n_out_lstm: 128
+sr: 44100
