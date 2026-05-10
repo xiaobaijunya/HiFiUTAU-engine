@@ -10,10 +10,7 @@ a = Analysis(
     ['http_syn2_cpu.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('exported_onnx_v2', 'exported_onnx_v2'),
-        ('hnsep_onnx', 'hnsep_onnx'),
-    ],
+    datas=[],
     hiddenimports=[
         'numba',
         'synthesis_pipeline',
