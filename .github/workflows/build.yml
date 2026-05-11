@@ -89,12 +89,13 @@ jobs:
       # ── 6. 下载 ONNX 模型 ──
       - name: Download ONNX models
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -sL \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/octet-stream" \
-            "https://github.com/xiaobaijunya/hifisampler-openutau/releases/download/${{ inputs.version }}/hifiserver_onnx.zip" \
-            -o models.zip
+          gh release download 0.0.0 \
+            --repo ${{ github.repository }} \
+            --pattern 'hifiserver_onnx.zip' \
+            --output models.zip
           unzip -q models.zip
           rm -f models.zip
 
