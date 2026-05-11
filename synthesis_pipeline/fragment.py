@@ -172,7 +172,7 @@ class Fragment:
         # ── 总时间预算（仅音频内容，不含空白填充） ──
         total_budget_ms = p4_x + stretched_preutter
         total_budget_frames = max(int(total_budget_ms / self.ms_per_frame), 1)
-        total_budget_frames += info.get('_extra_budget', 0)  # 吸收前一个交叉的余数
+
 
         # 包络最左边界（取 p0/p1 中更左的那个）
         # p1_x = info['envelope']['p1']['x']
