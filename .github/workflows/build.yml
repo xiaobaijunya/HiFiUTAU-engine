@@ -90,7 +90,11 @@ jobs:
       - name: Download ONNX models
         shell: bash
         run: |
-          curl -sL https://github.com/xiaobaijunya/hifisampler-openutau/releases/download/0.0.0/hifiserver_onnx.zip -o models.zip
+          curl -sL \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/octet-stream" \
+            "https://github.com/xiaobaijunya/hifisampler-openutau/releases/download/${{ inputs.version }}/hifiserver_onnx.zip" \
+            -o models.zip
           unzip -q models.zip
           rm -f models.zip
 
