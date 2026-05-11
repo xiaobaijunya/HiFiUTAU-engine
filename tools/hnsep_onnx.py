@@ -8,6 +8,7 @@ HN-SEP ONNX 推理模块
 
 import numpy as np
 import onnxruntime
+import os
 
 
 # 全局 ONNX 会话缓存

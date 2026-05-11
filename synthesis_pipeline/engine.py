@@ -9,7 +9,8 @@ import soundfile as sf
 from synthesis_pipeline.fragment import Fragment
 from synthesis_pipeline.post_process import apply_hnsep_postprocess
 from synthesis_pipeline.growl import apply_growl
-from synthesis_pipeline.utils import resample_array
+from synthesis_pipeline.tension_filter import apply_dynamic_lowcut
+from synthesis_pipeline.utils import resample_array, interp_to_len
 
 
 class SynthesisEngine:
@@ -64,7 +65,8 @@ class SynthesisEngine:
         print(f"动态参数: tension={len(frag.tension)}帧, "
               f"breath={len(frag.breath)}帧, "
               f"voicing={len(frag.voicing)}帧, "
-              f"growl={len(frag.growl)}帧")
+              f"growl={len(frag.growl)}帧, "
+              f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧")
 
         # ── 2. 音频切割 + mel（多线程） ──
         frag.cut_audio(max_workers=max_workers)
@@ -112,10 +114,23 @@ class SynthesisEngine:
                 _pad(frag.breath, front_dh, tail_dh),
                 _pad(frag.tension, front_dh, tail_dh),
                 _pad(frag.voicing, front_dh, tail_dh),
-                frag.sample_rate, self._hnsep
+                frag.sample_rate, self._hnsep,
+                f0_curve=_pad(frag.pit, front_dh, tail_dh),
+                brel_array=_pad(frag.brel, front_dh, tail_dh),
+                breh_array=_pad(frag.breh, front_dh, tail_dh),
             )
 
-        # ── 7. 咆哮效果（所有参数之后，最后一步） ──
+        # ── 7. 低切（F0 跟随 Butterworth 高通） ──
+        if len(frag.lowcut) > 0 and not np.allclose(frag.lowcut, 0, atol=0.5):
+            print("低切...")
+            wav = apply_dynamic_lowcut(
+                wav,
+                interp_to_len(_pad(frag.lowcut, front_dh, tail_dh), len(wav)),
+                frag.sample_rate,
+                f0_curve=_pad(frag.pit, front_dh, tail_dh),
+            )
+
+        # ── 8. 咆哮效果（所有参数之后，最后一步） ──
         # 传入原始 F0 让咆哮频率跟随音高（也同步补齐补帧）
         if len(frag.growl) > 0:
             wav = apply_growl(wav,
@@ -124,7 +139,7 @@ class SynthesisEngine:
                               f0=_pad(frag.pit, front_dh, tail_dh),
                               f0_hop=frag.Dynamic_hop)
 
-        # ── 8. 统一裁剪首尾补帧 ──
+        # ── 9. 统一裁剪首尾补帧 ──
         # HiFi-GAN 和 HN-SEP 都已受益于上下文，现在裁掉
         front_trim = self._splicer.front_pad_frames * self._splicer.model_hop
         tail_trim = self._splicer.tail_pad_frames * self._splicer.model_hop
