@@ -5,7 +5,11 @@ hifisampler HTTP 服务 — CPU 版本
 """
 from flask import Flask, request, Response
 import json
+import warnings
 from main_onnx import synthesize_audio, preload_all
+
+# 屏蔽 Werkzeug 开发服务器警告
+warnings.filterwarnings('ignore', message='.*development server.*')
 
 DEVICE = 'cpu'
 app = Flask(__name__)

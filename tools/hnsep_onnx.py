@@ -23,7 +23,7 @@ def get_global_hnsep_session(model_path: str = None):
     global _global_hnsep_session
     if _global_hnsep_session is None:
         if model_path is None:
-            model_path = r"hnsep_onnx\hnsep_VR_44.1k_hop512_2024.05.onnx"
+            model_path = os.path.join("hnsep_onnx", "hnsep_VR_44.1k_hop512_2024.05.onnx")
         print(f"加载 HN-SEP ONNX 模型: {model_path}")
         _global_hnsep_session = onnxruntime.InferenceSession(
             model_path, providers=['CPUExecutionProvider'])
