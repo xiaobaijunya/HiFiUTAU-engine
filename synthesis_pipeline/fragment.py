@@ -320,39 +320,50 @@ class Fragment:
         )
         return dynamic_range_compression(mel)
 
-    # ─── 预处理：计算每个音素与前一个音的交叉帧数 ───
-    def _calc_overlaps(self):
-        """提前计算交叉帧数（hop=512），余数累加到前一个音素的拉伸区。
+    # ─── mel 调试图片（测试用） ───
+    def _save_mel_debug_image(self, output_dir: str = "synthesis_pipeline/mel_debug"):
+        """将每个音素的 mel 频谱保存为 PNG 图片，用于测试验证。"""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
 
-        结果写入 self.phoneme_list[i]['overlap_h512']，splicer 直接读取，
-        避免 hidden_splicer 中 round() 截断导致的累积偏移。
-        """
-        ms_per_frame_512 = 512.0 / self.sample_rate * 1000  # ≈11.61ms
-        for i in range(1, len(self.phoneme_list)):
-            info = self.phoneme_list[i]
-            prev = self.phoneme_list[i - 1]
-            p0_x = info['envelope']['p0']['x']
-            p1_x = info['envelope']['p1']['x']
-            if p1_x < 0:
-                overlap_ms = abs(p0_x) - abs(p1_x)
-            else:
-                overlap_ms = abs(p1_x) + abs(p0_x)
+        os.makedirs(output_dir, exist_ok=True)
+        for i, info in enumerate(self.phoneme_list):
+            mel = info.get('mel')
+            if mel is None or mel.shape[1] == 0:
+                continue
+            name = info.get('phoneme_name', f'phoneme_{i}')
+            cons = info.get('consonant_frames', 0)
+            stretch = info.get('stretch_factor', 1.0)
 
-            overlap_exact = overlap_ms / ms_per_frame_512
-            overlap_h512 = int(overlap_exact)  # 取整做交叉
-            remainder = overlap_exact - overlap_h512  # 余数
-
-            # 余数转成 hop=44 帧，累加到前一个音的拉伸时长
-            if remainder > 0.001:
-                extra = int(round(remainder * 512.0 / self.hop_length))
-                prev['_extra_budget'] = prev.get('_extra_budget', 0) + extra
-
-            info['overlap_h512'] = overlap_h512
+            fig, ax = plt.subplots(figsize=(12, 4))
+            im = ax.imshow(mel, aspect='auto', origin='lower',
+                           cmap='magma', interpolation='nearest')
+            ax.axvline(x=cons - 0.5, color='cyan', linestyle='--',
+                       linewidth=1, label=f'consonant={cons}')
+            ax.set_title(f'{name}  (#{i})  |  con={cons}  '
+                         f'total={mel.shape[1]}帧  '
+                         f'stretch=×{stretch:.2f}')
+            ax.set_xlabel('帧')
+            ax.set_ylabel('mel 频带')
+            cbar = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.04)
+            cbar.set_label('log-mel')
+            ax.legend(loc='upper right', fontsize=8)
+            fig.tight_layout()
+            safe_name = name.replace('/', '_').replace('\\', '_').replace(' ', '_')
+            fig.savefig(os.path.join(output_dir, f'{i:03d}_{safe_name}.png'),
+                        dpi=150)
+            plt.close(fig)
 
     # ─── 主入口 ───
-    def cut_audio(self, max_workers: int = 4):
-        """预处理交叉帧 → 多线程并行处理所有音素。"""
-        self._calc_overlaps()
+    def cut_audio(self, max_workers: int = 4, save_mel_image: bool = False):
+        """预处理交叉帧 → 多线程并行处理所有音素。
+
+        Args:
+            max_workers: 并行线程数。
+            save_mel_image: 处理后是否保存每个音素的 mel 频谱图片到 mel_debug/。
+        """
+        # 交叉帧计算移至 hidden_splicer 内部用 round() 处理
         n = len(self.phoneme_list)
         if n <= 1:
             for i in range(n):
@@ -370,6 +381,9 @@ class Fragment:
                     import traceback
                     traceback.print_exc()
                     print(f"音素 {idx} 处理失败: {e}")
+
+        if save_mel_image:
+            self._save_mel_debug_image()
 
     # ─── 音量匹配 (phtp) ───
     def adjust_volume_by_phtp(self):

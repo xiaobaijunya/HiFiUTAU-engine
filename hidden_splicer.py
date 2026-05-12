@@ -124,7 +124,7 @@ class HiddenSplicer:
             else:
                 overlap_ms = abs(p1_x) + abs(p0_x)
 
-            overlap_frames_h512 = int(overlap_ms / self.ms_per_frame_model)
+            overlap_frames_h512 = round(overlap_ms / self.ms_per_frame_model)
             overlap_feat = overlap_frames_h512 * self.feat_upsample
 
             last_feat = segments[-1]
