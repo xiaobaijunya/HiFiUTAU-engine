@@ -68,6 +68,17 @@ class HiddenSplicer:
 
         available = onnxruntime.get_available_providers()
 
+        if device in ('tensorrt', 'trt'):
+            if 'TensorrtExecutionProvider' in available:
+                return ['TensorrtExecutionProvider',
+                        'CUDAExecutionProvider',
+                        'CPUExecutionProvider']
+            print('[警告] TensorrtExecutionProvider 不可用，尝试 CUDA')
+            if 'CUDAExecutionProvider' in available:
+                return ['CUDAExecutionProvider', 'CPUExecutionProvider']
+            print('[警告] CUDAExecutionProvider 也不可用，回退到 CPU')
+            return ['CPUExecutionProvider']
+
         if device in ('dml', 'directml'):
             if 'DmlExecutionProvider' in available:
                 return ['DmlExecutionProvider', 'CPUExecutionProvider']

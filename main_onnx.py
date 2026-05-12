@@ -5,6 +5,7 @@ hifisampler ONNX 合成入口 — 模型加载 + 合成调度。
 """
 import json
 import os
+import onnxruntime
 
 from tools.hidden_splicer import HiddenSplicer
 from synthesis_pipeline import SynthesisEngine
@@ -34,33 +35,43 @@ def get_splicer(part1_onnx: str, part2_onnx: str,
 
 
 def get_hnsep_session():
-    """获取 HN-SEP 全局会话 (懒加载)。"""
-    global _hnsep_session
-    if _hnsep_session is None:
-        from tools.hnsep_onnx import get_global_hnsep_session
-        _hnsep_session = get_global_hnsep_session()
+    """获取 HN-SEP 全局会话。"""
     return _hnsep_session
 
+
+# ═══════════════════════════════════════════════════════════════
+#  预加载（全部写在这里，不再套文件夹）
+# ═══════════════════════════════════════════════════════════════
 
 def preload_all(device: str = 'dml'):
     """服务器启动时预加载所有模型。
 
-    Args:
-        device: 'dml' (DirectML, 默认), 'cuda', 或 'cpu'
+    HN-SEP（LSTM）跳过 DML，仅用 CPU 或 CUDA。
     """
+    global _hnsep_session
+
     onnx_dir = r"exported_onnx_v2"
 
-    # HiddenSplicer (part1/part2 适合 DML 加速)
+    # ── HiddenSplicer (part1/part2) ──
     part1 = os.path.join(onnx_dir, "part1.onnx")
     part2 = os.path.join(onnx_dir, "part2.onnx")
     cfg = os.path.join(onnx_dir, "config.json")
     get_splicer(part1, part2, cfg, device)
 
-    # HN-SEP (含 LSTM, DML 不兼容, 强制 CPU)
+    # ── HN-SEP ──
     try:
-        from tools.hnsep_onnx import preload_hnsep_model
-        preload_hnsep_model()
-        get_hnsep_session()
+        hnsep_path = os.path.join("hnsep_onnx", "hnsep_VR_44.1k_hop512_2024.05.onnx")
+        available = onnxruntime.get_available_providers()
+        dl = device.lower()
+        if dl in ('cuda', 'gpu', 'tensorrt', 'trt'):
+            providers = (['CUDAExecutionProvider', 'CPUExecutionProvider']
+                         if 'CUDAExecutionProvider' in available
+                         else ['CPUExecutionProvider'])
+        else:
+            providers = ['CPUExecutionProvider']
+        print(f"加载 HN-SEP ONNX 模型: {hnsep_path}")
+        _hnsep_session = onnxruntime.InferenceSession(hnsep_path, providers=providers)
+        print(f'HN-SEP ONNX 模型已加载, providers: {_hnsep_session.get_providers()}')
     except Exception as e:
         print(f"[警告] HN-SEP 预加载失败: {e}")
 

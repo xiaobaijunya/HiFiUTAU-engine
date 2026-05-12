@@ -7,6 +7,16 @@ from synthesis_pipeline.utils import interp_to_len
 from synthesis_pipeline.tension_filter import apply_dynamic_tension, apply_breath_band_gain
 
 
+def _hnsep_separate(wav: np.ndarray, hnsep_model) -> tuple:
+    """统一分离谐波/噪声，支持 ONNX session 和 PyTorch 模型。"""
+    # 如果是 PyTorch 模型（有 separate 方法）
+    if hasattr(hnsep_model, 'separate'):
+        return hnsep_model.separate(wav)
+    # 否则走 ONNX Runtime
+    from tools.hnsep_onnx import hnsep_separate as _onnx_sep
+    return _onnx_sep(wav, hnsep_model)
+
+
 def apply_hnsep_postprocess(
     wav: np.ndarray,
     breath_array: np.ndarray,
@@ -26,7 +36,7 @@ def apply_hnsep_postprocess(
         tension_array:   Dynamic_hop 帧间距的 tension 值 (-100~100)
         voicing_array:   Dynamic_hop 帧间距的 voicing 值 (0~500)
         sr:              采样率
-        hnsep_session:   HN-SEP ONNX 推理会话
+        hnsep_session:   HN-SEP ONNX 推理会话 或 PytorchHnsep 实例
         f0_curve:        基频曲线 (Hz)，Dynamic_hop 分辨率，可选
         brel_array:      Dynamic_hop 帧间距的低频气声增益 (-100~100)，可选
         breh_array:      Dynamic_hop 帧间距的高频气声增益 (-100~100)，可选
@@ -54,9 +64,7 @@ def apply_hnsep_postprocess(
         return wav
 
     print("HN-SEP 后处理: 分离谐波/噪声 + 动态 breath/tension/voicing...")
-    from tools.hnsep_onnx import hnsep_separate
-
-    harmonic, noise = hnsep_separate(wav, hnsep_session)
+    harmonic, noise = _hnsep_separate(wav, hnsep_session)
     n_samples = len(wav)
 
     # breath — 线性增益映射 (-100=静音, 0=原始, +100=×4)

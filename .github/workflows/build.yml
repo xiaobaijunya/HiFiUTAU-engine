@@ -1,13 +1,13 @@
 # =============================================================================
-# hifisampler 全平台自动构建 (GitHub Actions)
+# hifisampler 全平台自动构建 (GitHub Actions) — PyTorch 版
 #
-# 参考 OpenUtau CI 结构，适配 PyInstaller Python 项目。
+# 使用原生 PyTorch 推理，替代 ONNX Runtime。
 # 手动触发时可指定版本号、是否为正式发布等。
 #
 # 产物:
-#   Windows CPU  → hifiserver_cpu.exe   → hifiserver-win-x64-{version}.zip
-#   Linux x64    → hifiserver_linux     → hifiserver-linux-x64-{version}.zip
-#   macOS ARM    → hifiserver_macos     → hifiserver-osx-arm64-{version}.zip
+#   Windows x64 → hifiserver_pytorch.exe → hifiserver-win-x64-{version}.zip
+#   Linux x64   → hifiserver_pytorch     → hifiserver-linux-x64-{version}.zip
+#   macOS ARM   → hifiserver_pytorch     → hifiserver-osx-arm64-{version}.zip
 # =============================================================================
 
 name: Build hifisampler
@@ -42,9 +42,9 @@ jobs:
       fail-fast: false
       matrix:
         arch:
-          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_cpu.spec,  output: hifiserver_cpu }
-          - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: hifiserver_linux.spec, output: hifiserver_linux }
-          - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: hifiserver_macos.spec, output: hifiserver_macos }
+          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_pytorch.spec,       output: hifiserver_pytorch }
+          - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: hifiserver_pytorch_linux.spec, output: hifiserver_pytorch }
+          - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: hifiserver_pytorch_macos.spec, output: hifiserver_pytorch }
 
     runs-on: ${{ matrix.arch.runs-on }}
     timeout-minutes: 30
@@ -84,20 +84,23 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install -r requirements.txt
+          pip install -r requirements_pytorch.txt
 
-      # ── 6. 下载 ONNX 模型 ──
-      - name: Download ONNX models
+      # ── 6. 确认模型文件 ──
+      # PyTorch 模型已包含在仓库中，无需额外下载
+      - name: Verify PyTorch model files
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download 0.0.0 \
-            --repo ${{ github.repository }} \
-            --pattern 'hifiserver_onnx.zip' \
-            --output models.zip
-          unzip -q models.zip
-          rm -f models.zip
+          if [ -f "pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt" ]; then
+            echo "主模型: model.ckpt 存在"
+          else
+            echo "::warning::主模型 model.ckpt 不存在"
+          fi
+          if [ -f "hnsep/vr/model.pt" ]; then
+            echo "HN-SEP 模型: model.pt 存在 (hnsep/vr/)"
+          else
+            echo "::warning::HN-SEP 模型 model.pt 不存在"
+          fi
 
       # ── 7. PyInstaller 打包 ──
       - name: Build with PyInstaller
@@ -113,7 +116,7 @@ jobs:
         shell: pwsh
         run: |
           $outDir = "dist\${{ matrix.arch.output }}"
-          @("hnsep_onnx", "exported_onnx_v2") | ForEach-Object {
+          @("pc_nsf_hifigan_44.1k_hop512_128bin_2025.02", "hnsep_onnx", "hnsep") | ForEach-Object {
             if (Test-Path $_ -PathType Container) {
               $dst = Join-Path $outDir $_
               if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
@@ -156,15 +159,17 @@ jobs:
           files: |
             hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.*
           body: |
-            ## hifiserver ${{ inputs.version }}
+            ## hifiserver ${{ inputs.version }} (PyTorch)
 
             | 平台 | 文件 | 说明 |
             |------|------|------|
-            | 🪟 Windows | `hifiserver-win-x64-${{ inputs.version }}.zip` | CPU 推理 |
-            | 🐧 Linux | `hifiserver-linux-x64-${{ inputs.version }}.zip` | CPU 推理 |
-            | 🍎 macOS | `hifiserver-osx-arm64-${{ inputs.version }}.zip` | CPU 推理 (Apple Silicon) |
+            | 🪟 Windows | `hifiserver-win-x64-${{ inputs.version }}.zip` | PyTorch CPU 推理 |
+            | 🐧 Linux | `hifiserver-linux-x64-${{ inputs.version }}.zip` | PyTorch CPU 推理 |
+            | 🍎 macOS | `hifiserver-osx-arm64-${{ inputs.version }}.zip` | PyTorch CPU 推理 (Apple Silicon) |
 
             > 解压后直接运行对应平台的可执行文件即可启动 HTTP 服务。
+            >
+            > 本版本使用原生 PyTorch 推理，不依赖 ONNX Runtime。
             >
             > **注意**: 只有【zhCVVC和zh某不能说音素器】支持自适应音量 PHTP 的自动设置。
             > 支持参数: GWL, TENC, BREC, VOIC, VEL, VOL, PHTP, GENC

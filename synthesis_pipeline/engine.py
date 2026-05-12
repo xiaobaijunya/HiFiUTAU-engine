@@ -9,7 +9,7 @@ import soundfile as sf
 from synthesis_pipeline.fragment import Fragment
 from synthesis_pipeline.post_process import apply_hnsep_postprocess
 from synthesis_pipeline.growl import apply_growl
-from synthesis_pipeline.tension_filter import apply_dynamic_lowcut, apply_harmonic_boost
+from synthesis_pipeline.tension_filter import apply_dynamic_lowcut
 from synthesis_pipeline.utils import resample_array, interp_to_len
 
 
@@ -66,8 +66,7 @@ class SynthesisEngine:
               f"breath={len(frag.breath)}帧, "
               f"voicing={len(frag.voicing)}帧, "
               f"growl={len(frag.growl)}帧, "
-              f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧, "
-              f"hm34={len(frag.hm34)}帧")
+              f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧")
 
         # ── 2. 音频切割 + mel（多线程） ──
         frag.cut_audio(max_workers=max_workers)
@@ -131,13 +130,7 @@ class SynthesisEngine:
                 f0_curve=_pad(frag.pit, front_dh, tail_dh),
             )
 
-        # ── 8. 3/4 次谐波增益 ──
-        if len(frag.hm34) > 0:
-            print("谐波增益 (hm34)...")
-            wav = apply_harmonic_boost(wav, _pad(frag.hm34, front_dh, tail_dh),
-                                        frag.sample_rate)
-
-        # ── 9. 咆哮效果（所有参数之后，最后一步） ──
+        # ── 8. 咆哮效果（所有参数之后，最后一步） ──
         # 传入原始 F0 让咆哮频率跟随音高（也同步补齐补帧）
         if len(frag.growl) > 0:
             wav = apply_growl(wav,

@@ -44,11 +44,11 @@ def receive_json():
 
 
 if __name__ == '__main__':
+    import onnxruntime
+    print(f"ONNX Runtime 可用设备: {onnxruntime.get_available_providers()}")
     print(f"正在预加载 ONNX 模型 (device={DEVICE})...")
     try:
         preload_all(device=DEVICE)
-        from tools.hnsep_onnx import preload_hnsep_model
-        preload_hnsep_model()
     except Exception as e:
         print(f"[WARN] 模型预加载失败（不影响运行，但首次合成会慢）: {e}")
     print("预加载完成")

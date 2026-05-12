@@ -1,12 +1,9 @@
 """
 Fragment — 音素片段处理：音频切割、mel 转换、时间拉伸。
-
-cut_audio 使用 ThreadPoolExecutor 并行读取+处理多个音频文件。
 """
 import os
 import numpy as np
 from scipy.interpolate import interp1d
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import librosa
 from synthesis_pipeline.utils import read_audio, dynamic_range_compression, resample_array, interp_to_len
 
@@ -33,7 +30,6 @@ class Fragment:
         self.lowcut = self._get_param(dp, ('lowcut', 'lowc'))
         self.brel = self._get_param(dp, ('brel', 'bret_low'))
         self.breh = self._get_param(dp, ('breh', 'bret_high'))
-        self.hm34 = self._get_param(dp, ('hm34', 'harm43'))
 
     # ─── 静态工具 ───
     @staticmethod

@@ -15,27 +15,40 @@ import os
 _global_hnsep_session = None
 
 
-def get_global_hnsep_session(model_path: str = None):
+def get_global_hnsep_session(model_path: str = None, device: str = 'cpu'):
     """获取全局 HN-SEP ONNX 会话（单例）。
 
     注意: HN-SEP 模型包含 LSTM op，DirectML 有 bug（运行时崩溃），
-          因此强制使用 CPU。（实测 DML 首次推理 9s 且第二次必崩）
+          因此跳过 DML，仅用 CPU 或 CUDA。
     """
     global _global_hnsep_session
     if _global_hnsep_session is None:
         if model_path is None:
             model_path = os.path.join("hnsep_onnx", "hnsep_VR_44.1k_hop512_2024.05.onnx")
+
+        # 根据 device 选择 provider（跳过 DML，LSTM 有 bug）
+        available = onnxruntime.get_available_providers()
+        device_lower = device.lower()
+        if device_lower in ('cuda', 'gpu', 'tensorrt', 'trt'):
+            if 'CUDAExecutionProvider' in available:
+                providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+            else:
+                print('[warn] CUDAExecutionProvider 不可用，HN-SEP 回退到 CPU')
+                providers = ['CPUExecutionProvider']
+        else:
+            providers = ['CPUExecutionProvider']
+
         print(f"加载 HN-SEP ONNX 模型: {model_path}")
         _global_hnsep_session = onnxruntime.InferenceSession(
-            model_path, providers=['CPUExecutionProvider'])
+            model_path, providers=providers)
         print(f'HN-SEP ONNX 模型已加载, providers: {_global_hnsep_session.get_providers()}')
     return _global_hnsep_session
 
 
-def preload_hnsep_model(model_path: str = None):
+def preload_hnsep_model(model_path: str = None, device: str = 'cpu'):
     """预加载 HN-SEP ONNX 模型。"""
     try:
-        get_global_hnsep_session(model_path)
+        get_global_hnsep_session(model_path, device=device)
         print("[OK] HN-SEP 模型预加载成功")
         return True
     except Exception as e:
