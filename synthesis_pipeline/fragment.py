@@ -33,6 +33,7 @@ class Fragment:
         self.lowcut = self._get_param(dp, ('lowcut', 'lowc'))
         self.brel = self._get_param(dp, ('brel', 'bret_low'))
         self.breh = self._get_param(dp, ('breh', 'bret_high'))
+        self.hm34 = self._get_param(dp, ('hm34', 'harm43'))
 
     # ─── 静态工具 ───
     @staticmethod
@@ -320,70 +321,12 @@ class Fragment:
         )
         return dynamic_range_compression(mel)
 
-    # ─── mel 调试图片（测试用） ───
-    def _save_mel_debug_image(self, output_dir: str = "synthesis_pipeline/mel_debug"):
-        """将每个音素的 mel 频谱保存为 PNG 图片，用于测试验证。"""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        os.makedirs(output_dir, exist_ok=True)
-        for i, info in enumerate(self.phoneme_list):
-            mel = info.get('mel')
-            if mel is None or mel.shape[1] == 0:
-                continue
-            name = info.get('phoneme_name', f'phoneme_{i}')
-            cons = info.get('consonant_frames', 0)
-            stretch = info.get('stretch_factor', 1.0)
-
-            fig, ax = plt.subplots(figsize=(12, 4))
-            im = ax.imshow(mel, aspect='auto', origin='lower',
-                           cmap='magma', interpolation='nearest')
-            ax.axvline(x=cons - 0.5, color='cyan', linestyle='--',
-                       linewidth=1, label=f'consonant={cons}')
-            ax.set_title(f'{name}  (#{i})  |  con={cons}  '
-                         f'total={mel.shape[1]}帧  '
-                         f'stretch=×{stretch:.2f}')
-            ax.set_xlabel('帧')
-            ax.set_ylabel('mel 频带')
-            cbar = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.04)
-            cbar.set_label('log-mel')
-            ax.legend(loc='upper right', fontsize=8)
-            fig.tight_layout()
-            safe_name = name.replace('/', '_').replace('\\', '_').replace(' ', '_')
-            fig.savefig(os.path.join(output_dir, f'{i:03d}_{safe_name}.png'),
-                        dpi=150)
-            plt.close(fig)
 
     # ─── 主入口 ───
-    def cut_audio(self, max_workers: int = 4, save_mel_image: bool = False):
-        """预处理交叉帧 → 多线程并行处理所有音素。
-
-        Args:
-            max_workers: 并行线程数。
-            save_mel_image: 处理后是否保存每个音素的 mel 频谱图片到 mel_debug/。
-        """
-        # 交叉帧计算移至 hidden_splicer 内部用 round() 处理
-        n = len(self.phoneme_list)
-        if n <= 1:
-            for i in range(n):
-                self._process_single_phoneme(i)
-            return
-
-        with ThreadPoolExecutor(max_workers=min(max_workers, n)) as executor:
-            futures = {executor.submit(self._process_single_phoneme, i): i
-                       for i in range(n)}
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    idx = futures[future]
-                    import traceback
-                    traceback.print_exc()
-                    print(f"音素 {idx} 处理失败: {e}")
-
-        if save_mel_image:
-            self._save_mel_debug_image()
+    def cut_audio(self, max_workers: int = 1):
+        """串行处理所有音素。"""
+        for i in range(len(self.phoneme_list)):
+            self._process_single_phoneme(i)
 
     # ─── 音量匹配 (phtp) ───
     def adjust_volume_by_phtp(self):
