@@ -48,6 +48,7 @@ def preload_all(device: str = 'dml'):
 
     HN-SEP（LSTM）跳过 DML，仅用 CPU 或 CUDA。
     """
+    import os  # 本地导入，避免 PyInstaller 环境下模块级 import 作用域问题
     global _hnsep_session
 
     onnx_dir = r"exported_onnx_v2"

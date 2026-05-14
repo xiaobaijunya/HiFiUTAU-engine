@@ -21,6 +21,7 @@ def get_global_hnsep_session(model_path: str = None, device: str = 'cpu'):
     注意: HN-SEP 模型包含 LSTM op，DirectML 有 bug（运行时崩溃），
           因此跳过 DML，仅用 CPU 或 CUDA。
     """
+    import os  # 本地导入，避免 PyInstaller 环境下的作用域问题
     global _global_hnsep_session
     if _global_hnsep_session is None:
         if model_path is None:
