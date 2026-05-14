@@ -91,19 +91,13 @@ jobs:
       # ── 6. 下载 ONNX 模型 ──
       - name: Download ONNX models
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="0.0.0"
-          if gh release view "$TAG" --repo xiaobaijunya/SynthHiFiU >/dev/null 2>&1; then
-            echo "Downloading models from release: $TAG"
-            gh release download "$TAG" \
-              --repo xiaobaijunya/SynthHiFiU \
-              --pattern "hifiserver_onnx.zip"
-          else
-            echo "Release $TAG not found, trying 'latest'..."
-            gh release download latest \
-              --repo xiaobaijunya/SynthHiFiU \
-              --pattern "hifiserver_onnx.zip"
-          fi
+          echo "Downloading models from tag: 0.0.0"
+          gh release download "0.0.0" \
+            --repo xiaobaijunya/SynthHiFiU \
+            --pattern "hifiserver_onnx.zip"
           unzip -q hifiserver_onnx.zip
           rm -f hifiserver_onnx.zip
 
