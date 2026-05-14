@@ -84,6 +84,7 @@ jobs:
 
       # ── 5. Python 依赖 ──
       - name: Install Python dependencies
+        shell: bash
         run: |
           python -m pip install --upgrade pip wheel setuptools
           # macOS Intel 上 llvmlite 源码编译易失败，优先用二进制 wheel
