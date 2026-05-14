@@ -136,6 +136,7 @@ jobs:
           name: hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}
           path: dist/${{ matrix.arch.output }}/
           if-no-files-found: error
+          retention-days: 3
 
       # ── 10. Release 时再打包为 zip ──
       - name: Create release zip (Windows)
