@@ -1,5 +1,5 @@
 # =============================================================================
-# hifisampler PyTorch 全平台自动构建 (GitHub Actions)
+# SynthHiFiU PyTorch 全平台自动构建 (GitHub Actions)
 #
 # 独立的 PyTorch 推理版构建流程，与 ONNX 版完全分离。
 #
@@ -10,7 +10,7 @@
 #   macOS x64    → hifiserver-pytorch-osx-x64-{version}.zip
 # =============================================================================
 
-name: Build hifisampler (PyTorch)
+name: Build SynthHiFiU (PyTorch)
 
 on:
   workflow_dispatch:
@@ -45,7 +45,6 @@ jobs:
           - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_pytorch.spec,         output: hifiserver_pytorch }
           - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: hifiserver_pytorch_linux.spec,  output: hifiserver_pytorch }
           - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: hifiserver_pytorch_macos.spec,  output: hifiserver_pytorch }
-          - { name: osx-x64,   os: osx,  runs-on: macos-15-intel,  spec: hifiserver_pytorch_macos.spec,  output: hifiserver_pytorch }
 
     runs-on: ${{ matrix.arch.runs-on }}
     timeout-minutes: 60
@@ -97,12 +96,10 @@ jobs:
         run: |
           echo "Downloading models from tag: 0.0.1"
           gh release download "0.0.1" \
-            --repo xiaobaijunya/hifisampler-openutau \
+            --repo xiaobaijunya/SynthHiFiU\
             --pattern "pytorch_model.zip"
           unzip -q pytorch_model.zip
           rm -f pytorch_model.zip
-          echo "--- 模型文件 ---"
-          find . -name "*.ckpt" -o -name "*.onnx" -o -name "config.json" -o -name "config.yaml" | head -20
 
       # ── 7. PyInstaller 打包 ──
       - name: Build with PyInstaller
@@ -169,7 +166,6 @@ jobs:
             | 🪟 Windows | `hifiserver-pytorch-win-x64-${{ inputs.version }}.zip` | CPU 推理 |
             | 🐧 Linux | `hifiserver-pytorch-linux-x64-${{ inputs.version }}.zip` | CPU 推理 |
             | 🍎 macOS ARM | `hifiserver-pytorch-osx-arm64-${{ inputs.version }}.zip` | Apple Silicon |
-            | 🍎 macOS Intel | `hifiserver-pytorch-osx-x64-${{ inputs.version }}.zip` | Intel Mac |
 
-            > 基于 PyTorch 的 hifisampler，使用 CPU 推理。
+            > 基于 PyTorch 的 SynthHiFiU，使用 CPU 推理。
             > 解压后直接运行对应平台的可执行文件即可启动 HTTP 服务。

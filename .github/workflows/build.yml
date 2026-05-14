@@ -1,5 +1,5 @@
 # =============================================================================
-# hifisampler 全平台自动构建 (GitHub Actions)
+# SynthHiFiU 全平台自动构建 (GitHub Actions)
 #
 # 参考 OpenUtau CI 结构，适配 PyInstaller Python 项目。
 # 手动触发时可指定版本号、是否为正式发布等。
@@ -8,9 +8,10 @@
 #   Windows CPU  → hifiserver_cpu.exe   → hifiserver-win-x64-{version}.zip
 #   Linux x64    → hifiserver_linux     → hifiserver-linux-x64-{version}.zip
 #   macOS ARM    → hifiserver_macos     → hifiserver-osx-arm64-{version}.zip
+#   macOS x64    → hifiserver_macos     → hifiserver-osx-x64-{version}.zip
 # =============================================================================
 
-name: Build hifisampler
+name: Build SynthHiFiU
 
 on:
   workflow_dispatch:
@@ -45,6 +46,7 @@ jobs:
           - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_cpu.spec,  output: hifiserver_cpu }
           - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: hifiserver_linux.spec, output: hifiserver_linux }
           - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: hifiserver_macos.spec, output: hifiserver_macos }
+          - { name: osx-x64,   os: osx,  runs-on: macos-15-intel, spec: hifiserver_macos.spec, output: hifiserver_macos }
 
     runs-on: ${{ matrix.arch.runs-on }}
     timeout-minutes: 30
@@ -91,15 +93,15 @@ jobs:
         shell: bash
         run: |
           TAG="0.0.0"
-          if gh release view "$TAG" --repo xiaobaijunya/hifisampler-openutau >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo xiaobaijunya/SynthHiFiU >/dev/null 2>&1; then
             echo "Downloading models from release: $TAG"
             gh release download "$TAG" \
-              --repo xiaobaijunya/hifisampler-openutau \
+              --repo xiaobaijunya/SynthHiFiU \
               --pattern "hifiserver_onnx.zip"
           else
             echo "Release $TAG not found, trying 'latest'..."
             gh release download latest \
-              --repo xiaobaijunya/hifisampler-openutau \
+              --repo xiaobaijunya/SynthHiFiU \
               --pattern "hifiserver_onnx.zip"
           fi
           unzip -q hifiserver_onnx.zip
@@ -169,6 +171,7 @@ jobs:
             | 🪟 Windows | `hifiserver-win-x64-${{ inputs.version }}.zip` | CPU 推理 |
             | 🐧 Linux | `hifiserver-linux-x64-${{ inputs.version }}.zip` | CPU 推理 |
             | 🍎 macOS | `hifiserver-osx-arm64-${{ inputs.version }}.zip` | CPU 推理 (Apple Silicon) |
+            | 🍎 macOS Intel | `hifiserver-osx-x64-${{ inputs.version }}.zip` | CPU 推理 (Intel Mac) |
 
             > 解压后直接运行对应平台的可执行文件即可启动 HTTP 服务。
             >
