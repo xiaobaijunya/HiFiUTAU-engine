@@ -1,0 +1,17 @@
+# hifisampler PyTorch 依赖 — 全平台通用
+# 使用此文件替换 requirements.txt 以构建纯 PyTorch 版本（无 ONNX Runtime）
+flask>=3.0
+numpy>=1.24
+scipy>=1.10
+soundfile>=0.12
+librosa>=0.10
+pyinstaller>=6.0
+pyyaml>=6.0
+
+# PyTorch（CPU 版全平台通用）
+# CUDA 版（Windows 带 GPU 的机器）:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# CPU 版（Linux / macOS / 无 GPU Windows）:
+#   pip install torch torchvision torchaudio
+# 注意: 需要 pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt
+torch>=2.0
