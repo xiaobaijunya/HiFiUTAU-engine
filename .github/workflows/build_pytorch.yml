@@ -93,7 +93,18 @@ jobs:
       - name: Download PyTorch models
         shell: bash
         run: |
-          curl -sL "https://github.com/xiaobaijunya/hifisampler-openutau/releases/download/0.0.1/pytorch_model.zip" -o pytorch_model.zip
+          TAG="${{ inputs.version }}"
+          if gh release view "$TAG" --repo xiaobaijunya/hifisampler-openutau >/dev/null 2>&1; then
+            echo "Downloading models from release: $TAG"
+            gh release download "$TAG" \
+              --repo xiaobaijunya/hifisampler-openutau \
+              --pattern "pytorch_model.zip"
+          else
+            echo "Release $TAG not found, trying 'latest'..."
+            gh release download latest \
+              --repo xiaobaijunya/hifisampler-openutau \
+              --pattern "pytorch_model.zip"
+          fi
           unzip -q pytorch_model.zip
           rm -f pytorch_model.zip
           echo "--- 模型文件 ---"
