@@ -91,10 +91,21 @@ class SynthesisEngine:
         print(f"{len(f0)} 帧")
 
         # ── 5. 隐空间拼接 + 合成 ──
-        print("隐空间混合拼接...")
-        wav = self._splicer.splice_and_synthesize(
-            frag.phoneme_list, frag.ms_per_frame, frag.hop_length, f0
+        # 检查是否有音素使用了 splc=1 标志（mel 域能量拼接）
+        use_mel_crossfade = any(
+            info.get('Note_flags', {}).get('splc', 0) == 1
+            for info in frag.phoneme_list
         )
+        if use_mel_crossfade:
+            print("隐空间混合拼接 (混合模式: mel 域+feat 域)...")
+            wav = self._splicer.splice_and_synthesize_mixed(
+                frag.phoneme_list, frag.ms_per_frame, frag.hop_length, f0
+            )
+        else:
+            print("隐空间混合拼接...")
+            wav = self._splicer.splice_and_synthesize(
+                frag.phoneme_list, frag.ms_per_frame, frag.hop_length, f0
+            )
 
         # ── 6. HN-SEP 后处理 ──
         # 波形已包含首尾补帧，动态参数需同步补齐再传入

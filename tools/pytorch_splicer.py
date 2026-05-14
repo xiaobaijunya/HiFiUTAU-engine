@@ -349,3 +349,180 @@ class PytorchHiddenSplicer:
         )
         print(f"[Griffin-Lim] 波形长度: {len(y)} 采样 ({len(y)/sr*1000:.1f}ms)")
         return y
+
+    # ------------------------------------------------------------------
+    @torch.inference_mode()
+    def splice_and_synthesize_mixed(self, phoneme_list, ms_per_frame_hop, hop_length, f0_np):
+        """
+        混合拼接模式：每个音素按 splc 标志独立选择拼接方式。
+
+        splc=1 的音素与前一个音素在 mel 域做能量归一化交叉淡化，
+        splc=0 的音素保持原 feat 域交叉淡化。
+
+        流程：
+          1. 根据 splc 将音素分组 — 连续 splc=1 的音素合并为 mel 域组
+          2. mel 域组：组内 mel 域能量交叉淡化 → 一次 resample → 一次 part1
+             feat 域组：逐音素独立 resample → part1
+          3. 所有组的 feat 在边界处做 feat 域交叉淡化
+          4. part2 合成波形
+        """
+        if self.griffin_lim_mode:
+            return self._griffin_lim_synthesize(phoneme_list, hop_length)
+
+        hop_model = self.model_hop  # 512
+        dtype = torch.float16 if self.fp16 else torch.float32
+        ratio = hop_length / hop_model  # 44/512
+
+        n = len(phoneme_list)
+
+        # ── 第 1 步: 扫描 splc 标志，构建分组 ──
+        # 每个 segment 为一组音素索引列表
+        segments = []
+        cur = [0]
+        for i in range(1, n):
+            splc = phoneme_list[i].get('Note_flags', {}).get('splc', 0)
+            if splc == 1:
+                cur.append(i)  # mel 域合并到当前组
+            else:
+                segments.append(cur)
+                cur = [i]
+        segments.append(cur)
+
+        # ── 第 2 步: 处理每组得到 feat ──
+        seg_feats = []          # list of torch.Tensor or None
+        seg_first_idx = []      # 每组第一个音素的索引（用于取 envelope 计算跨组 overlap）
+
+        for seg in segments:
+            seg_first_idx.append(seg[0])
+
+            if len(seg) == 1:
+                # ── 单个音素：独立 resample → part1 ──
+                i = seg[0]
+                mel = phoneme_list[i]['mel']
+                if mel.shape[1] == 0:
+                    seg_feats.append(None)
+                    continue
+                target = max(1, round(mel.shape[1] * ratio))
+                mel_512 = self._resample_mel(mel, target)
+                enc_pad = self.encoder_pad_frames
+                if enc_pad > 0:
+                    pad_mel = np.repeat(mel_512[:, :1], enc_pad, axis=1)
+                    mel_512 = np.concatenate([pad_mel, mel_512], axis=1)
+                mel_t = torch.from_numpy(mel_512.astype(np.float32)) \
+                    .unsqueeze(0).to(device=self.device, dtype=dtype)
+                feat = self.model.forward_part1(mel_t)
+                if enc_pad > 0:
+                    trim_feat = enc_pad * self.feat_upsample
+                    feat = feat[:, :, trim_feat:]
+                seg_feats.append(feat)
+
+            else:
+                # ── 多个音素：mel 域能量拼接 → 一次 resample → 一次 part1 ──
+                seg_mels = []
+                for j, idx in enumerate(seg):
+                    mel = phoneme_list[idx]['mel']
+                    if mel.shape[1] == 0:
+                        continue
+                    if j == 0:
+                        seg_mels.append(mel)
+                        continue
+
+                    info = phoneme_list[idx]
+                    p0_x = info['envelope']['p0']['x']
+                    p1_x = info['envelope']['p1']['x']
+                    if p1_x < 0:
+                        overlap_ms = abs(p0_x) - abs(p1_x)
+                    else:
+                        overlap_ms = abs(p1_x) + abs(p0_x)
+                    ov = int(overlap_ms / ms_per_frame_hop)
+                    ov = min(ov, seg_mels[-1].shape[1], mel.shape[1])
+
+                    if ov <= 0:
+                        seg_mels.append(mel)
+                        continue
+
+                    tail = seg_mels[-1][:, -ov:]
+                    head = mel[:, :ov]
+                    body = seg_mels[-1][:, :-ov]
+                    body2 = mel[:, ov:]
+
+                    tail_lin = np.exp(tail)
+                    head_lin = np.exp(head)
+                    # 逐帧能量匹配：overlap 内每帧独立缩放，使 head 每帧能量与 tail 对齐
+                    tail_energy = np.mean(tail_lin ** 2, axis=0)  # (ov,)
+                    head_energy = np.mean(head_lin ** 2, axis=0)  # (ov,)
+                    head_energy = np.maximum(head_energy, 1e-12)
+                    tail_energy = np.maximum(tail_energy, 1e-12)
+                    gain = np.sqrt(tail_energy / head_energy)    # (ov,)
+                    head_lin = head_lin * gain.reshape(1, -1)
+
+                    # 恒定功率交叉淡化（sqrt fade），避免线性 fade 在幅度域产生能量凹陷
+                    fade_in  = np.sqrt(np.linspace(0, 1, ov)).reshape(1, -1)
+                    fade_out = np.sqrt(np.linspace(1, 0, ov)).reshape(1, -1)
+                    cross_lin = tail_lin * fade_out + head_lin * fade_in
+                    cross = np.log(np.maximum(cross_lin, 1e-12))
+
+                    seg_mels[-1] = body
+                    seg_mels.append(cross)
+                    seg_mels.append(body2)
+
+                if not seg_mels:
+                    seg_feats.append(None)
+                    continue
+
+                mel_concat = np.concatenate(seg_mels, axis=1)
+                target = max(1, round(mel_concat.shape[1] * ratio))
+                mel_512 = self._resample_mel(mel_concat, target)
+                enc_pad = self.encoder_pad_frames
+                if enc_pad > 0:
+                    pad_mel = np.repeat(mel_512[:, :1], enc_pad, axis=1)
+                    mel_512 = np.concatenate([pad_mel, mel_512], axis=1)
+                mel_t = torch.from_numpy(mel_512.astype(np.float32)) \
+                    .unsqueeze(0).to(device=self.device, dtype=dtype)
+                feat = self.model.forward_part1(mel_t)
+                if enc_pad > 0:
+                    trim_feat = enc_pad * self.feat_upsample
+                    feat = feat[:, :, trim_feat:]
+                seg_feats.append(feat)
+
+        # ── 第 3 步: 组间 feat 域交叉淡化 ──
+        feat_segments = []
+        for si, feat in enumerate(seg_feats):
+            if feat is None:
+                continue
+            if si == 0 or not feat_segments:
+                feat_segments.append(feat)
+                continue
+
+            info = phoneme_list[seg_first_idx[si]]
+            p0_x = info['envelope']['p0']['x']
+            p1_x = info['envelope']['p1']['x']
+            if p1_x < 0:
+                overlap_ms = abs(p0_x) - abs(p1_x)
+            else:
+                overlap_ms = abs(p1_x) + abs(p0_x)
+            ov_frames_512 = round(overlap_ms / self.ms_per_frame_model)
+            ov_feat = ov_frames_512 * self.feat_upsample
+
+            last_feat = feat_segments[-1]
+            ov_feat = min(ov_feat, last_feat.shape[2], feat.shape[2])
+
+            if ov_feat <= 0:
+                feat_segments.append(feat)
+                continue
+
+            f_in  = torch.linspace(0, 1, ov_feat, device=self.device, dtype=dtype).view(1, 1, -1)
+            f_out = torch.linspace(1, 0, ov_feat, device=self.device, dtype=dtype).view(1, 1, -1)
+            tail  = last_feat[:, :, -ov_feat:]
+            body  = last_feat[:, :, :-ov_feat]
+            head  = feat[:, :, :ov_feat]
+            body2 = feat[:, :, ov_feat:]
+            feat_segments[-1] = body
+            feat_segments.append(tail * f_out + head * f_in)
+            feat_segments.append(body2)
+
+        if not feat_segments:
+            return np.zeros(0, dtype=np.float32)
+
+        combined_feat = torch.cat(feat_segments, dim=2)
+        return self.synthesize(combined_feat, f0_np)

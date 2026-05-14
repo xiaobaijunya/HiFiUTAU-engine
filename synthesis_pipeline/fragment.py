@@ -109,6 +109,15 @@ class Fragment:
         cutoff_ms = oto['Cutoff']
         Preutter_ms = oto['Preutter']
 
+        # 提前计算包络左边界位置，判断是否需要把音频提取起点前移
+        # 当 p0 往左拉时（包络左边界在音频起点之前），后续 cubic 插值会把
+        # 空白帧和内容帧混合导致开头能量被拉低；前移几帧让 mel 自然多出真实音频
+        p0_x = info['envelope']['p0']['x']
+        vel = info['Note_flags']['vel']
+        stretch_factor = 2.0 ** ((100 - vel) / 100.0)
+        stretched_preutter = Preutter_ms * stretch_factor
+        pre_to_left_ms = stretched_preutter + p0_x
+
         # 切段（使用 round 避免 sample 边界系统性偏移）
         start_sample = int(round(offset_ms / 1000 * sr))
         consonant_sample = int(round((offset_ms + consonant_ms) / 1000 * sr))
@@ -116,6 +125,10 @@ class Fragment:
             end_sample = int(round((total_len_ms - cutoff_ms) / 1000 * sr))
         else:
             end_sample = int(round((offset_ms + abs(cutoff_ms)) / 1000 * sr))
+
+        # p0 往左拉 → 音频起点提前几帧，给插值留余量
+        if pre_to_left_ms < 0:
+            start_sample = max(0, start_sample - 12 * base_hop)  # 4帧 hop=44
 
         start_sample = max(0, min(start_sample, len(audio)))
         consonant_sample = max(start_sample, min(consonant_sample, len(audio)))
@@ -160,26 +173,12 @@ class Fragment:
         vow_frames_orig = n_frames - con_frames_orig
 
         # stretch
-        vel = info['Note_flags']['vel']
-        stretch_factor = 2.0 ** ((100 - vel) / 100.0)
-        p0_x = info['envelope']['p0']['x']
         p4_x = info['envelope']['p4']['x']
-        stretched_preutter = Preutter_ms * stretch_factor
+        # p0_x、stretch_factor、stretched_preutter、pre_to_left_ms 已在前面提前计算
 
         # ── 总时间预算（仅音频内容，不含空白填充） ──
         total_budget_ms = p4_x + stretched_preutter
         total_budget_frames = max(int(total_budget_ms / self.ms_per_frame), 1)
-
-
-        # 包络最左边界（取 p0/p1 中更左的那个）
-        # p1_x = info['envelope']['p1']['x']
-        # left_bound = min(p0_x, p1_x)
-        left_bound = p0_x
-        # 计算最左边界相对音频起点的位置
-        # stretched_preutter 为正值（音频起点到中心的距离）
-        # left_bound 为负值（中心到包络最左的距离）
-        # pre_to_left_ms > 0 → 裁剪; < 0 → 补空白
-        pre_to_left_ms = stretched_preutter + left_bound
 
         # 辅音帧数（拉伸后，浮点精度）
         target_con_frames = max(1, int(con_frames_orig * stretch_factor))
@@ -244,15 +243,19 @@ class Fragment:
             )
             print(f"  循环: {info['phoneme_name']} 元音 {vow_frames_orig}→{target_vow_frames}帧，能量归一化")
 
-        # ── 左侧裁剪/补空白（基于包络最左边界 left_bound） ──
+        # ── 左侧裁剪/补空白（基于包络最左边界） ──
         # pre_to_left_ms > 0: 左边界在音频起点之后 → 裁剪前面多余帧
         # pre_to_left_ms < 0: 左边界在音频起点之前 → 前面补空白帧
+        #                      注意：音频提取已提前 4 帧，空白后紧接真实音频，
+        #                      避免 cubic 插值时空白直接与辅音开头混合导致能量被拉低
         if pre_to_left_ms > 0:
             left_cut_frames = int(pre_to_left_ms / self.ms_per_frame)
             if left_cut_frames < mel_out.shape[1]:
                 mel_out = mel_out[:, left_cut_frames:]
+                target_con_frames = max(0, target_con_frames - left_cut_frames)
             else:
                 mel_out = np.empty((n_mels, 0))
+                target_con_frames = 0
         elif pre_to_left_ms < 0:
             left_pad_frames = int(-pre_to_left_ms / self.ms_per_frame)
             blank = np.full((n_mels, left_pad_frames),
@@ -260,7 +263,7 @@ class Fragment:
             # 渐入：用 4 帧从空白平滑过渡到真实音频，避免 HiFi-GAN 解码硬切换噪声
             # 注意：使用逐频带 fade-in，保留频谱形状，避免平坦频谱产生咔哒声
             if mel_out.shape[1] > 0:
-                fade_in_frames = min(4, left_pad_frames)
+                fade_in_frames = min(12, left_pad_frames)
                 first_frame = mel_out[:, 0]  # 保留各频带原始能量分布
                 for t in range(fade_in_frames):
                     alpha = (t + 1) / (fade_in_frames + 1)
@@ -269,6 +272,16 @@ class Fragment:
                         np.exp(first_frame) * alpha + 1e-10
                     )
             mel_out = np.concatenate([blank, mel_out], axis=1)
+            target_con_frames = target_con_frames + left_pad_frames
+
+            # 前音素尾部固定缩短 12 帧，与音频提取提前量抵消，保证时间线对齐
+            if i > 0:
+                prev_info = self.phoneme_list[i - 1]
+                prev_mel = prev_info.get('mel')
+                if prev_mel is not None and prev_mel.shape[1] > 12:
+                    prev_info['mel'] = prev_mel[:, :-12]
+                    prev_con = prev_info.get('consonant_frames', 0)
+                    prev_info['consonant_frames'] = max(0, prev_con - 12)
 
         # ── 首/尾音素淡入淡出已移至 engine.py 波形域统一处理 ──
 
@@ -276,7 +289,7 @@ class Fragment:
         P = info.get('Note_flags', {}).get('P', 0)
         if P > 0 and mel_out.shape[1] > 0:
             target_rms = 0.5  # 固定目标：音频最大音量的一半
-            audio_start = max(0, int(-pre_to_left_ms / self.ms_per_frame) if pre_to_left_ms < 0 else 0)
+            audio_start = left_pad_frames if pre_to_left_ms < 0 else 0
             if mel_out.shape[1] > audio_start:
                 mel_audio = mel_out[:, audio_start:]
                 cur_rms = float(np.sqrt(np.mean(np.exp(mel_audio) ** 2)))
