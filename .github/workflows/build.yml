@@ -90,7 +90,7 @@ jobs:
       - name: Download ONNX models
         shell: bash
         run: |
-          TAG="${{ inputs.version }}"
+          TAG="0.0.0"
           if gh release view "$TAG" --repo xiaobaijunya/hifisampler-openutau >/dev/null 2>&1; then
             echo "Downloading models from release: $TAG"
             gh release download "$TAG" \

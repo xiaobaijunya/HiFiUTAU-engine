@@ -95,18 +95,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ inputs.version }}"
-          if gh release view "$TAG" --repo xiaobaijunya/hifisampler-openutau >/dev/null 2>&1; then
-            echo "Downloading models from release: $TAG"
-            gh release download "$TAG" \
-              --repo xiaobaijunya/hifisampler-openutau \
-              --pattern "pytorch_model.zip"
-          else
-            echo "Release $TAG not found, trying 'latest'..."
-            gh release download latest \
-              --repo xiaobaijunya/hifisampler-openutau \
-              --pattern "pytorch_model.zip"
-          fi
+          echo "Downloading models from tag: 0.0.1"
+          gh release download "0.0.1" \
+            --repo xiaobaijunya/hifisampler-openutau \
+            --pattern "pytorch_model.zip"
           unzip -q pytorch_model.zip
           rm -f pytorch_model.zip
           echo "--- 模型文件 ---"
