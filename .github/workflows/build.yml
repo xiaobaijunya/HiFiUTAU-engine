@@ -129,16 +129,7 @@ jobs:
             }
           }
 
-      # ── 9. 上传 Artifact（直接上传 dist 目录）──
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}
-          path: dist/${{ matrix.arch.output }}/
-          if-no-files-found: error
-          retention-days: 3
-
-      # ── 10. Release 时再打包为 zip ──
+      # ── 9. Release 时打包为 zip 并上传到 Release assets（不走 Artifact 配额）──
       - name: Create release zip (Windows)
         if: ${{ inputs.release && matrix.arch.os == 'win' }}
         shell: pwsh
