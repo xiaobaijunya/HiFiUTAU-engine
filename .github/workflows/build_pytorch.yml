@@ -92,6 +92,8 @@ jobs:
       # ── 6. 下载 PyTorch 模型 ──
       - name: Download PyTorch models
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ inputs.version }}"
           if gh release view "$TAG" --repo xiaobaijunya/hifisampler-openutau >/dev/null 2>&1; then
