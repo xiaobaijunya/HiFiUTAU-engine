@@ -38,6 +38,8 @@ env:
 
 jobs:
   build:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +109,8 @@ jobs:
       # ── 7. 运行合成测试（模型就绪后立即验证管线）──
       - name: Run synthesis test
         shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           python test/test.py --dry-run
           python test/test.py
@@ -152,6 +156,8 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         if: ${{ inputs.release }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ inputs.version }}
           name: ${{ env.release-name }}
