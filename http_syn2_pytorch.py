@@ -14,8 +14,6 @@ from main_pytorch import synthesize_audio, preload_all
 warnings.filterwarnings('ignore', message='.*development server.*')
 
 DEVICE = 'cuda'
-# Griffin-Lim 测试模式（True=跳过 HiFiGAN 用 Griffin-Lim 重建，False=正常 HiFiGAN）
-GRIFFIN_LIM_MODE = False
 app = Flask(__name__)
 
 
@@ -28,7 +26,7 @@ def receive_json():
         with open('test.json', 'w', encoding='utf-8') as f:
             f.write(json.dumps(data, indent=2, ensure_ascii=False))
 
-        wav_bytes = synthesize_audio(data, device=DEVICE, griffin_lim_mode=GRIFFIN_LIM_MODE)
+        wav_bytes = synthesize_audio(data, device=DEVICE)
 
         print('合成完成')
 
@@ -55,14 +53,12 @@ if __name__ == '__main__':
     _fp16 = _os.environ.get('HIFISAMPLER_FP16', '0') == '1'
 
     print(f"正在预加载 PyTorch 模型 (device={DEVICE})...")
-    print(f"  优化: compile={_compile}, fp16={_fp16}, griffin_lim={GRIFFIN_LIM_MODE}")
+    print(f"  优化: compile={_compile}, fp16={_fp16}")
     print(f"  提示: 设置环境变量 HIFISAMPLER_COMPILE=1 启用 torch.compile")
     print(f"        设置环境变量 HIFISAMPLER_FP16=1 启用 FP16 推理")
 
-    # Griffin-Lim 测试模式（改 GRIFFIN_LIM_MODE=False 切回 HiFiGAN）
     try:
-        preload_all(device=DEVICE, compile_model=_compile, fp16=_fp16,
-                    griffin_lim_mode=GRIFFIN_LIM_MODE)
+        preload_all(device=DEVICE, compile_model=_compile, fp16=_fp16)
     except FileNotFoundError as e:
         print(f"[ERROR] {e}")
         print("""

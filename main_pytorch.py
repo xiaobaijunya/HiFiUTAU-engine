@@ -27,17 +27,15 @@ _hnsep_model: PytorchHnsep | None = None
 def get_splicer(checkpoint_path: str, config_path: str,
                 device: str = 'cuda', *,
                 compile_model: bool = False,
-                fp16: bool = False,
-                griffin_lim_mode: bool = False) -> PytorchHiddenSplicer:
+                fp16: bool = False) -> PytorchHiddenSplicer:
     """获取缓存的 PyTorch Splicer，首次加载后复用。"""
     global _pytorch_splicer, _pytorch_splicer_config
-    config_key = (checkpoint_path, config_path, device, compile_model, fp16, griffin_lim_mode)
+    config_key = (checkpoint_path, config_path, device, compile_model, fp16)
     if _pytorch_splicer is None or _pytorch_splicer_config != config_key:
         print("[缓存] 加载 PytorchHiddenSplicer 模型...")
         _pytorch_splicer = PytorchHiddenSplicer(
             checkpoint_path, config_path, device=device,
             compile_model=compile_model, fp16=fp16,
-            griffin_lim_mode=griffin_lim_mode,
         )
         _pytorch_splicer_config = config_key
         print("[缓存] PytorchHiddenSplicer 就绪")
@@ -117,8 +115,7 @@ def _resolve_hnsep_paths(device: str):
 
 def preload_all(device: str = 'cuda', *,
                compile_model: bool = False,
-               fp16: bool = False,
-               griffin_lim_mode: bool = False):
+               fp16: bool = False):
     """服务器启动时预加载所有模型。
 
     全部使用 PyTorch 推理（SplitGenerator + CascadedNet HN-SEP）。
@@ -127,7 +124,6 @@ def preload_all(device: str = 'cuda', *,
         device:        'cuda' 或 'cpu'
         compile_model: 启用 torch.compile（需 PyTorch ≥2.0）
         fp16:          启用 FP16 推理（仅 GPU 有效，吞吐量提升~40%）
-        griffin_lim_mode: 为 True 时跳过 HiFiGAN，使用 Griffin-Lim 重建（测试节奏用）
     """
     global _hnsep_model
 
@@ -136,9 +132,8 @@ def preload_all(device: str = 'cuda', *,
     cfg = _resolve_config_path()
     print(f"[预加载] SplitGenerator checkpoint: {ckpt}")
     print(f"[预加载] 配置文件: {cfg}")
-    print(f"[预加载] 优化: compile={compile_model}, fp16={fp16}, griffin_lim={griffin_lim_mode}")
-    get_splicer(ckpt, cfg, device, compile_model=compile_model, fp16=fp16,
-                griffin_lim_mode=griffin_lim_mode)
+    print(f"[预加载] 优化: compile={compile_model}, fp16={fp16}")
+    get_splicer(ckpt, cfg, device, compile_model=compile_model, fp16=fp16)
 
     # ── HN-SEP PyTorch 模型 ──
     try:
@@ -164,8 +159,7 @@ def preload_all(device: str = 'cuda', *,
 # ============================================================================
 
 def synthesize_audio(json_data: dict, *, test: bool = False,
-                     max_workers: int = 4, device: str = 'cuda',
-                     griffin_lim_mode: bool = False) -> bytes:
+                     max_workers: int = 4, device: str = 'cuda') -> bytes:
     """执行完整合成管线。模型从缓存获取，无需每次传入。
 
     Args:
@@ -173,7 +167,6 @@ def synthesize_audio(json_data: dict, *, test: bool = False,
         test:        是否写出测试 WAV
         max_workers: cut_audio 并行线程数
         device:      'cuda' (默认), 'cpu'
-        griffin_lim_mode: 为 True 时跳过 HiFiGAN，使用 Griffin-Lim 重建（测试用）
 
     Returns:
         WAV bytes
@@ -188,7 +181,6 @@ def synthesize_audio(json_data: dict, *, test: bool = False,
         device,
         compile_model=compile_model,
         fp16=fp16,
-        griffin_lim_mode=griffin_lim_mode,
     )
     hnsep = get_hnsep_model()
 
