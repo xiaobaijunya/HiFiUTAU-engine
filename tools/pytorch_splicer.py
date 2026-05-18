@@ -52,12 +52,7 @@ class PytorchHiddenSplicer(BaseSplicer):
             fp16:            是否使用 FP16 推理 (仅 GPU 有效)
         """
         super().__init__(config_path)
-        self.h = AttrDict({
-            'hop_size': self.model_hop,
-            'sampling_rate': self.sample_rate,
-            'upsample_rates': [8, 8, 2, 2],  # 与 feat_upsample=64 对应
-            'num_mels': self.num_mels,
-        })
+        self.h = AttrDict(self._config)  # 完整配置，SplitGenerator 需要所有字段
 
         self.fp16 = fp16 and device.lower() != 'cpu'
 

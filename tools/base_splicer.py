@@ -28,6 +28,7 @@ class BaseSplicer:
         """
         with open(config_path) as f:
             config = json.load(f)
+        self._config = config  # 完整配置，子类可能需要（如 SplitGenerator）
 
         self.model_hop = config['hop_size']              # 512
         self.sample_rate = config['sampling_rate']       # 44100
@@ -61,7 +62,7 @@ class BaseSplicer:
             return mel.copy()
         old = np.arange(mel.shape[1])
         new = np.linspace(0, mel.shape[1] - 1, target_frames)
-        return interp1d(old, mel, axis=1, kind='cubic',
+        return interp1d(old, mel, axis=1, kind='linear',
                         bounds_error=False, fill_value='extrapolate')(new)
 
     def _encode_one(self, mel: np.ndarray, ratio: float) -> np.ndarray:
