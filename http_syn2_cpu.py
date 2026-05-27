@@ -269,6 +269,9 @@ def receive_json():
 # ============================================================================
 
 if __name__ == '__main__':
+    # PyInstaller 打包后 multiprocessing 需要此调用防止递归启动
+    multiprocessing.freeze_support()
+
     config = read_config()
     _device = config['device']
 
