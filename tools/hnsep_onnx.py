@@ -185,17 +185,18 @@ def _separate_with_session(waveform: np.ndarray, session) -> tuple:
             ['mask_real', 'mask_imag'],
             {'spec_real': spec_real, 'spec_imag': spec_imag})
 
-        mask = torch.from_numpy(mask_r + 1j * mask_i)
-        spec_t = torch.view_as_complex(
-            torch.stack([spec.real, spec.imag], dim=-1).contiguous())
-        spec_pred = spec_t * mask  # (1, 1, 1025, T)
+        # 保持 complex64 精度，与 PyTorch 原始行为一致
+        mask = torch.complex(
+            torch.from_numpy(mask_r), torch.from_numpy(mask_i))
+        spec_pred = spec * mask  # (1, 1, 1025, T)
 
-        # ISTFT 需要 (B*C, freq, T) 形状的复数张量
-        spec_pred_2d = spec_pred.reshape(1, spec_pred.shape[-2], spec_pred.shape[-1])
+        # ISTFT 需要 (B*C, freq, T) 形状
+        B, C = spec_pred.shape[0], spec_pred.shape[1]
+        spec_pred_2d = spec_pred.reshape(B * C, spec_pred.shape[-2], spec_pred.shape[-1])
         harmonic_t = torch.istft(
             spec_pred_2d, n_fft=n_fft, hop_length=hop_length,
             window=torch.hann_window(n_fft), length=len(padded))
-        # istft 输出 (1, padded_len)，取 batch=0，裁剪补齐
+        # istft 输出 (B*C, padded_len)，取 batch=0，裁剪补齐
         harmonic = harmonic_t[0, Tl_pad:Tl_pad + n_samples].numpy()
         noise = wav[:len(harmonic)] - harmonic
         return harmonic, noise
