@@ -72,6 +72,8 @@ jobs:
       # ── 6. 运行合成测试 ──
       - name: Run synthesis test
         shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           python test/test.py --dry-run
           python test/test.py
