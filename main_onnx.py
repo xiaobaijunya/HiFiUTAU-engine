@@ -46,7 +46,7 @@ def get_hnsep_session():
 def preload_all(device: str = 'dml'):
     """服务器启动时预加载所有模型。
 
-    HN-SEP（LSTM）跳过 DML，仅用 CPU 或 CUDA。
+    HN-SEP 用 pt2 新模型（spec→mask），支持 DML。
     """
     import os  # 本地导入，避免 PyInstaller 环境下模块级 import 作用域问题
     global _hnsep_session
@@ -61,15 +61,18 @@ def preload_all(device: str = 'dml'):
 
     # ── HN-SEP ──
     try:
-        hnsep_path = os.path.join("hnsep_onnx", "hnsep_VR_44.1k_hop512_2024.05.onnx")
-        available = onnxruntime.get_available_providers()
+        hnsep_path = os.path.join(
+            "hnsep_onnx", "hnsep_VR_44.1k_hop512_2024.05.pt2.onnx")
+        if not os.path.exists(hnsep_path):
+            hnsep_path = os.path.join(
+                "hnsep_onnx", "hnsep_VR_44.1k_hop512_2024.05.onnx")
+
         dl = device.lower()
-        if dl in ('cuda', 'gpu', 'tensorrt', 'trt'):
-            providers = (['CUDAExecutionProvider', 'CPUExecutionProvider']
-                         if 'CUDAExecutionProvider' in available
-                         else ['CPUExecutionProvider'])
+        if dl in ('dml', 'directml'):
+            providers = ['DmlExecutionProvider', 'CPUExecutionProvider']
         else:
             providers = ['CPUExecutionProvider']
+
         print(f"加载 HN-SEP ONNX 模型: {hnsep_path}")
         _hnsep_session = onnxruntime.InferenceSession(hnsep_path, providers=providers)
         print(f'HN-SEP ONNX 模型已加载, providers: {_hnsep_session.get_providers()}')

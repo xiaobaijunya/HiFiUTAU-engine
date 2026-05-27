@@ -13,7 +13,7 @@ class Fragment:
 
     def __init__(self, json_data: dict):
         self.sample_rate = 44100
-        self.hop_length = 44
+        self.hop_length = 64
         self.ms_per_frame = (self.hop_length / self.sample_rate) * 1000
 
         self.Dynamic_hop = json_data['hop_size']

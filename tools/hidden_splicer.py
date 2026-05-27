@@ -20,7 +20,7 @@ class HiddenSplicer(BaseSplicer):
             part1_onnx_path: part1.onnx 路径 (mel → 隐特征)
             part2_onnx_path: part2.onnx 路径 (隐特征 + f0 → 波形)
             config_path:     config.json 路径
-            device:          'dml' (DirectML), 'cuda', 或 'cpu'
+            device:          'dml' (DirectML) 或 'cpu'
         """
         super().__init__(config_path)
 
@@ -49,35 +49,10 @@ class HiddenSplicer(BaseSplicer):
 
     @staticmethod
     def _resolve_providers(device: str) -> list:
-        """根据 device 名称解析 ONNX Runtime provider 列表（带可用性检测+回退）。"""
+        """根据 device 名称解析 ONNX Runtime provider 列表。"""
         device = device.lower()
         if device == 'cpu':
             return ['CPUExecutionProvider']
-
-        available = onnxruntime.get_available_providers()
-
-        if device in ('tensorrt', 'trt'):
-            if 'TensorrtExecutionProvider' in available:
-                return ['TensorrtExecutionProvider',
-                        'CUDAExecutionProvider',
-                        'CPUExecutionProvider']
-            print('[警告] TensorrtExecutionProvider 不可用，尝试 CUDA')
-            if 'CUDAExecutionProvider' in available:
-                return ['CUDAExecutionProvider', 'CPUExecutionProvider']
-            print('[警告] CUDAExecutionProvider 也不可用，回退到 CPU')
-            return ['CPUExecutionProvider']
-
         if device in ('dml', 'directml'):
-            if 'DmlExecutionProvider' in available:
-                return ['DmlExecutionProvider', 'CPUExecutionProvider']
-            print('[警告] DmlExecutionProvider 不可用，回退到 CPU')
-            return ['CPUExecutionProvider']
-
-        if device in ('cuda', 'gpu'):
-            if 'CUDAExecutionProvider' in available:
-                return ['CUDAExecutionProvider', 'CPUExecutionProvider']
-            print('[警告] CUDAExecutionProvider 不可用，回退到 CPU')
-            return ['CPUExecutionProvider']
-
-        print(f'[警告] 未知 device="{device}"，回退到 CPU')
-        return ['CPUExecutionProvider']
+            return ['DmlExecutionProvider', 'CPUExecutionProvider']
+        raise ValueError(f'未知 device="{device}"，仅支持 cpu 或 dml')
