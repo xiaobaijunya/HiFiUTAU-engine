@@ -10,9 +10,7 @@ a = Analysis(
     ['http_syn2_cpu.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('run_config.txt', '.'),
-    ],
+    datas=[],
     hiddenimports=[
         'numba',
         'synthesis_pipeline',

@@ -87,8 +87,8 @@ jobs:
             --workpath build-dml `
             --noconfirm
 
-      # ── 8. 复制模型到输出目录 ──
-      - name: Copy models to dist
+      # ── 8. 复制模型和配置到输出目录 ──
+      - name: Copy models and config to dist
         shell: pwsh
         run: |
           $outDir = "dist\hifiserver_dml"
@@ -100,6 +100,9 @@ jobs:
               Write-Output "Copied $_ to $outDir"
             }
           }
+          # 复制运行配置到 exe 旁边
+          Copy-Item "run_config.txt" (Join-Path $outDir "run_config.txt")
+          Write-Output "Copied run_config.txt to $outDir"
 
       # ── 9. 打包为 zip ──
       - name: Create release zip
