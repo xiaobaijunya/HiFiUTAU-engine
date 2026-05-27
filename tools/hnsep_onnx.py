@@ -12,43 +12,6 @@ import numpy as np
 import onnxruntime
 from tools.base_hnsep import BaseHnsep
 
-# STFT 参数（固定，与训练一致）
-N_FFT = 2048
-HOP_LENGTH = 512
-SEG_LENGTH = 32 * HOP_LENGTH  # 16384
-
-
-def _pad_to_seg(wav: np.ndarray) -> tuple:
-    """补齐音频到 seg_length 边界，返回 (padded, tl_pad, original_len)。"""
-    T = len(wav)
-    T1 = T + HOP_LENGTH
-    T_pad = SEG_LENGTH * ((T1 - 1) // SEG_LENGTH + 1) - T1
-    nl_pad = T_pad // 2 // HOP_LENGTH
-    Tl_pad = nl_pad * HOP_LENGTH
-    padded = np.pad(wav, (Tl_pad, T_pad - Tl_pad), mode='constant')
-    return padded, Tl_pad, T
-
-
-def _stft(wav: np.ndarray) -> np.ndarray:
-    """numpy STFT，返回 (1, 1, freq, time) 复数。"""
-    from scipy import signal
-    f, t, Zxx = signal.stft(
-        wav, fs=44100, nperseg=N_FFT, noverlap=N_FFT - HOP_LENGTH,
-        window='hann', boundary=None, padded=False
-    )
-    Zxx = Zxx[np.newaxis, np.newaxis, :, :]  # (1, 1, 1025, T)
-    return Zxx.astype(np.complex64)
-
-
-def _istft(spec: np.ndarray, length: int) -> np.ndarray:
-    """numpy ISTFT，返回时域波形。"""
-    from scipy import signal
-    _, wav = signal.istft(
-        spec[0, 0], fs=44100, nperseg=N_FFT, noverlap=N_FFT - HOP_LENGTH,
-        window='hann', boundary=False
-    )
-    return wav[:length].astype(np.float32)
-
 
 class OnnxHnsep(BaseHnsep):
     """HN-SEP 谐波/噪声分离器 — ONNX Runtime 版。"""
@@ -98,27 +61,46 @@ class OnnxHnsep(BaseHnsep):
         return harmonic[0], noise[0]
 
     def _separate_pt2(self, waveform: np.ndarray) -> tuple:
-        """新模型：外部 STFT → mask → ISTFT → harmonic + noise。"""
-        # 1. 补齐 + STFT
+        """新模型：numpy STFT → mask → numpy ISTFT（无 torch/scipy 依赖）。"""
+        n_fft, hop_length = 2048, 512
+        seg_length = 32 * hop_length
+        window = np.hanning(n_fft).astype(np.float32)
+
         n_samples = len(waveform)
-        padded, tl_pad, _ = _pad_to_seg(waveform)
-        spec = _stft(padded)  # (1, 1, freq, T), complex64
+        T1 = n_samples + hop_length
+        T_pad = seg_length * ((T1 - 1) // seg_length + 1) - T1
+        nl_pad = T_pad // 2 // hop_length
+        Tl_pad = nl_pad * hop_length
+        padded = np.pad(waveform, (Tl_pad, T_pad - Tl_pad), mode='constant')
 
-        # 2. 调用 ONNX 模型
-        spec_real = np.ascontiguousarray(spec.real)
-        spec_imag = np.ascontiguousarray(spec.imag)
-        mask_real, mask_imag = self.session.run(
+        # numpy STFT
+        pad_len = n_fft // 2
+        buf = np.pad(padded, (pad_len, pad_len), mode='reflect')
+        n_frames = (len(buf) - n_fft) // hop_length + 1
+        spec = np.zeros((1, 1, n_fft // 2 + 1, n_frames), dtype=np.complex64)
+        for t in range(n_frames):
+            idx = t * hop_length
+            spec[0, 0, :, t] = np.fft.rfft(buf[idx:idx + n_fft] * window)
+
+        mask_r, mask_i = self.session.run(
             ['mask_real', 'mask_imag'],
-            {'spec_real': spec_real, 'spec_imag': spec_imag})
+            {'spec_real': np.ascontiguousarray(spec.real),
+             'spec_imag': np.ascontiguousarray(spec.imag)})
 
-        # 3. 复数乘法：spec * mask
-        mask = mask_real + 1j * mask_imag
-        spec_pred = spec * mask
+        # numpy ISTFT
+        spec_pred = spec * (mask_r + 1j * mask_i)
+        out_len = len(buf)
+        harmonic = np.zeros(out_len, dtype=np.float32)
+        norm = np.zeros(out_len, dtype=np.float32)
+        for t in range(n_frames):
+            idx = t * hop_length
+            frame = np.fft.irfft(spec_pred[0, 0, :, t], n=n_fft).real * window
+            harmonic[idx:idx + n_fft] += frame
+            norm[idx:idx + n_fft] += window ** 2
+        harmonic = harmonic / np.maximum(norm, 1e-10)
 
-        # 4. ISTFT → 裁剪补齐
-        harmonic = _istft(spec_pred, len(padded))[tl_pad:tl_pad + n_samples]
+        harmonic = harmonic[pad_len + Tl_pad:pad_len + Tl_pad + n_samples]
         noise = waveform[:len(harmonic)] - harmonic
-
         return harmonic, noise
 
 
@@ -161,11 +143,10 @@ def _separate_with_session(waveform: np.ndarray, session) -> tuple:
         return session.separate(waveform)
 
     if set(out_names) == {'mask_real', 'mask_imag'}:
-        # 新模型: spec → mask
-        # 用 torch 做 STFT/ISTFT 以保证与训练一致
-        import torch
+        # pt2 模型: spec → mask，用 numpy 做 STFT/ISTFT
         n_fft, hop_length = 2048, 512
         seg_length = 32 * hop_length
+        window = np.hanning(n_fft).astype(np.float32)
 
         n_samples = len(wav)
         T1 = n_samples + hop_length
@@ -174,30 +155,34 @@ def _separate_with_session(waveform: np.ndarray, session) -> tuple:
         Tl_pad = nl_pad * hop_length
         padded = np.pad(wav, (Tl_pad, T_pad - Tl_pad), mode='constant')
 
-        wav_t = torch.from_numpy(padded).unsqueeze(0)
-        spec = torch.stft(wav_t, n_fft=n_fft, hop_length=hop_length,
-                          return_complex=True, window=torch.hann_window(n_fft))
-        spec = spec.unsqueeze(0)  # (1, 1, freq, T)
+        # ── numpy STFT（匹配 torch.stft: reflect padding + rfft）──
+        pad_len = n_fft // 2
+        buf = np.pad(padded, (pad_len, pad_len), mode='reflect')
+        n_frames = (len(buf) - n_fft) // hop_length + 1
+        spec = np.zeros((1, 1, n_fft // 2 + 1, n_frames), dtype=np.complex64)
+        for t in range(n_frames):
+            idx = t * hop_length
+            spec[0, 0, :, t] = np.fft.rfft(buf[idx:idx + n_fft] * window)
 
-        spec_real = np.ascontiguousarray(spec.real.numpy())
-        spec_imag = np.ascontiguousarray(spec.imag.numpy())
+        # ── ONNX mask 推理 ──
         mask_r, mask_i = session.run(
             ['mask_real', 'mask_imag'],
-            {'spec_real': spec_real, 'spec_imag': spec_imag})
+            {'spec_real': np.ascontiguousarray(spec.real),
+             'spec_imag': np.ascontiguousarray(spec.imag)})
 
-        # 保持 complex64 精度，与 PyTorch 原始行为一致
-        mask = torch.complex(
-            torch.from_numpy(mask_r), torch.from_numpy(mask_i))
-        spec_pred = spec * mask  # (1, 1, 1025, T)
-
-        # ISTFT 需要 (B*C, freq, T) 形状
-        B, C = spec_pred.shape[0], spec_pred.shape[1]
-        spec_pred_2d = spec_pred.reshape(B * C, spec_pred.shape[-2], spec_pred.shape[-1])
-        harmonic_t = torch.istft(
-            spec_pred_2d, n_fft=n_fft, hop_length=hop_length,
-            window=torch.hann_window(n_fft), length=len(padded))
-        # istft 输出 (B*C, padded_len)，取 batch=0，裁剪补齐
-        harmonic = harmonic_t[0, Tl_pad:Tl_pad + n_samples].numpy()
+        # ── numpy ISTFT（重叠相加法）──
+        spec_pred = spec * (mask_r + 1j * mask_i)
+        out_len = len(buf)
+        harmonic = np.zeros(out_len, dtype=np.float32)
+        norm = np.zeros(out_len, dtype=np.float32)
+        for t in range(n_frames):
+            idx = t * hop_length
+            frame = np.fft.irfft(spec_pred[0, 0, :, t], n=n_fft).real * window
+            harmonic[idx:idx + n_fft] += frame
+            norm[idx:idx + n_fft] += window ** 2
+        harmonic = harmonic / np.maximum(norm, 1e-10)
+        # 裁剪 reflect padding 和 seg padding
+        harmonic = harmonic[pad_len + Tl_pad:pad_len + Tl_pad + n_samples]
         noise = wav[:len(harmonic)] - harmonic
         return harmonic, noise
     else:
@@ -228,7 +213,3 @@ def apply_breath_tension(waveform, breath=100, voicing=100, tension=0, session=N
         _global_hnsep_instance = OnnxHnsep()
     return _global_hnsep_instance.apply_breath_tension(
         waveform, breath=breath, voicing=voicing, tension=tension)
-    processed = apply_breath_tension(test_wav, breath=150, tension=50)
-    print(f"处理后音频: {processed.shape}")
-
-    print("[OK] HN-SEP ONNX 模块测试通过")
