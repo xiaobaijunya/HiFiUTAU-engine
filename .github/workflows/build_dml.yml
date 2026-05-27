@@ -1,0 +1,118 @@
+# =============================================================================
+# SynthHiFiU Windows DML 独立构建 (GitHub Actions)
+#
+# 单独打包 Windows DML 版，不依赖 Linux/macOS 构建。
+# 依赖: onnxruntime-directml
+#
+# 产物:
+#   Windows DML → hifiserver_dml.exe → hifiserver-win-x64-dml-{version}.zip
+# =============================================================================
+
+name: Build DML (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version"
+        default: "0.0.0"
+        required: true
+        type: string
+
+env:
+  release-name: ${{ inputs.version }}
+
+jobs:
+  build-dml:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. 检出代码 ──
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. 设置 Python ──
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ── 3. UPX ──
+      - name: Install UPX
+        shell: pwsh
+        run: |
+          curl -sL https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-win64.zip -o upx.zip
+          Expand-Archive upx.zip -DestinationPath .
+          echo "$pwd/upx-4.2.4-win64" >> $env:GITHUB_PATH
+
+      # ── 4. Python 依赖 ──
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install -r requirements.txt
+          pip install onnxruntime-directml
+
+      # ── 5. 下载 ONNX 模型 ──
+      - name: Download ONNX models
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Downloading models from tag: 0.0.0"
+          gh release download "0.0.0" `
+            --repo xiaobaijunya/SynthHiFiU `
+            --pattern "hifiserver_onnx.zip"
+          Expand-Archive -Path hifiserver_onnx.zip -DestinationPath . -Force
+          Remove-Item hifiserver_onnx.zip
+
+      # ── 6. 运行合成测试 ──
+      - name: Run synthesis test
+        shell: pwsh
+        run: |
+          python test/test.py --dry-run
+          python test/test.py
+
+      # ── 7. PyInstaller 打包 ──
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller hifiserver_dml.spec `
+            --distpath dist `
+            --workpath build-dml `
+            --noconfirm
+
+      # ── 8. 复制模型到输出目录 ──
+      - name: Copy models to dist
+        shell: pwsh
+        run: |
+          $outDir = "dist\hifiserver_dml"
+          @("hnsep_onnx", "exported_onnx_v2") | ForEach-Object {
+            if (Test-Path $_ -PathType Container) {
+              $dst = Join-Path $outDir $_
+              if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+              Copy-Item -Recurse -Path $_ -Destination $outDir
+              Write-Output "Copied $_ to $outDir"
+            }
+          }
+
+      # ── 9. 打包为 zip ──
+      - name: Create release zip
+        shell: pwsh
+        run: |
+          cd dist\hifiserver_dml
+          7z a -r ..\..\hifiserver-win-x64-dml-${{ inputs.version }}.zip *
+
+      # ── 10. 上传到 Release ──
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ inputs.version }}
+          name: ${{ env.release-name }}
+          files: |
+            hifiserver-win-x64-dml-${{ inputs.version }}.zip
