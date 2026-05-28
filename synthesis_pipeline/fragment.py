@@ -179,19 +179,30 @@ class Fragment:
         p4_x = info['envelope']['p4']['x']
         # p0_x、stretch_factor、stretched_preutter、pre_to_left_ms 已在前面提前计算
 
-        # ── 总时间预算（仅音频内容，不含空白填充） ──
-        # VEL 决定目标长度：total_budget_ms = p4_x + Preutter * stretch_factor
-        # 四舍五入取整，不累计误差——round() 自身对称，正负偏差自然抵消
-        total_budget_ms = p4_x + stretched_preutter
-        total_budget_frames = max(round(total_budget_ms / self.ms_per_frame), 1)
+        # ── 内容帧数（p0→p4），与 VEL 无关 ──
+        # 包络决定的内容长度：p4_x - p0_x 是固定值，VEL 只改变 preutter 位置
+        # 先算内容帧数，再加裁剪/补白得到总拉伸帧数，保证内容不随 VEL 漂移
+        content_exact = (p4_x - p0_x) / self.ms_per_frame
+        content_frames = max(round(content_exact), 1)
 
         # 辅音帧数（拉伸后，四舍五入）
         target_con_frames = max(1, round(con_frames_orig * stretch_factor))
-        target_con_frames = min(target_con_frames, total_budget_frames - 1)
+        target_con_frames = min(target_con_frames, content_frames - 1)
 
-        # 元音帧数 = 总帧数 - 辅音帧数（无额外 int 截断，保证总帧数精确匹配时间预算）
-        target_vow_frames = total_budget_frames - target_con_frames
-        total_frames = total_budget_frames
+        # 元音帧数 = 内容帧数 - 辅音帧数
+        target_vow_frames = content_frames - target_con_frames
+
+        # 总拉伸帧数 = 内容帧数 + 左侧裁剪/补白（左侧由 VEL 决定）
+        if pre_to_left_ms > 0:
+            exact_left_cut = pre_to_left_ms / self.ms_per_frame
+            left_cut_frames = round(exact_left_cut)
+            total_frames = content_frames + left_cut_frames
+        elif pre_to_left_ms < 0:
+            exact_left_pad = -pre_to_left_ms / self.ms_per_frame
+            left_pad_frames = round(exact_left_pad)
+            total_frames = content_frames  # 先拉伸内容，后面再补白
+        else:
+            total_frames = content_frames
 
         # ── strt=1: 参考 He 标志 — 用 np.pad(mode='reflect') 做正反循环 ──
         # 原理：元音部分用 reflect padding 扩展，插值自然走正反循环
@@ -256,9 +267,7 @@ class Fragment:
         if pre_to_left_ms > 0:
             exact_left_cut = pre_to_left_ms / self.ms_per_frame
             left_cut_frames = round(exact_left_cut)
-            # round() 比 int() 可能多裁/少裁，补偿到 total_frames 使内容帧数不变
-            # 推导：int 版实际 = budget - int(cut)；round 版 = (budget+adj) - round(cut) = budget - int(cut)
-            total_frames += left_cut_frames - int(exact_left_cut)
+            # total_frames 已在上面设为 content_frames + left_cut_frames，无需补偿
             if left_cut_frames < mel_out.shape[1]:
                 mel_out = mel_out[:, left_cut_frames:]
                 target_con_frames = max(0, target_con_frames - left_cut_frames)
@@ -268,8 +277,6 @@ class Fragment:
         elif pre_to_left_ms < 0:
             exact_left_pad = -pre_to_left_ms / self.ms_per_frame
             left_pad_frames = round(exact_left_pad)
-            # 补白 case 补偿符号与裁剪相反
-            total_frames -= left_pad_frames - int(exact_left_pad)
             blank = np.full((n_mels, left_pad_frames),
                             np.log(1e-5), dtype=mel_out.dtype)
             # 渐入：用 4 帧从空白平滑过渡到真实音频，避免 HiFi-GAN 解码硬切换噪声
