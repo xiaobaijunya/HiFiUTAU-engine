@@ -31,6 +31,9 @@ class Fragment:
         self.brel = self._get_param(dp, ('brel', 'bret_low'))
         self.breh = self._get_param(dp, ('breh', 'bret_high'))
 
+        # hop=512 帧误差累积器：补偿 splicer 中 int(mel.shape[1] * 64/512) 的截断
+        self._frame_error_hop512 = 0.0
+
     # ─── 静态工具 ───
     @staticmethod
     def _get_param(dp: dict, keys: tuple) -> np.ndarray:
@@ -167,8 +170,8 @@ class Fragment:
             info['stretch_factor'] = 1.0
             return i
 
-        # 辅音/元音帧数
-        con_frames_orig = max(1, int((con_samples - base_hop) / base_hop) + 1) if con_samples > 0 else 0
+        # 辅音/元音帧数（四舍五入，使辅音边界分配更精确）
+        con_frames_orig = max(1, round(con_samples / base_hop)) if con_samples > 0 else 0
         con_frames_orig = min(con_frames_orig, n_frames)
         vow_frames_orig = n_frames - con_frames_orig
 
@@ -177,11 +180,13 @@ class Fragment:
         # p0_x、stretch_factor、stretched_preutter、pre_to_left_ms 已在前面提前计算
 
         # ── 总时间预算（仅音频内容，不含空白填充） ──
+        # VEL 决定目标长度：total_budget_ms = p4_x + Preutter * stretch_factor
+        # 四舍五入取整，不累计误差——round() 自身对称，正负偏差自然抵消
         total_budget_ms = p4_x + stretched_preutter
-        total_budget_frames = max(int(total_budget_ms / self.ms_per_frame), 1)
+        total_budget_frames = max(round(total_budget_ms / self.ms_per_frame), 1)
 
-        # 辅音帧数（拉伸后，浮点精度）
-        target_con_frames = max(1, int(con_frames_orig * stretch_factor))
+        # 辅音帧数（拉伸后，四舍五入）
+        target_con_frames = max(1, round(con_frames_orig * stretch_factor))
         target_con_frames = min(target_con_frames, total_budget_frames - 1)
 
         # 元音帧数 = 总帧数 - 辅音帧数（无额外 int 截断，保证总帧数精确匹配时间预算）
@@ -249,7 +254,11 @@ class Fragment:
         #                      注意：音频提取已提前 4 帧，空白后紧接真实音频，
         #                      避免 cubic 插值时空白直接与辅音开头混合导致能量被拉低
         if pre_to_left_ms > 0:
-            left_cut_frames = int(pre_to_left_ms / self.ms_per_frame)
+            exact_left_cut = pre_to_left_ms / self.ms_per_frame
+            left_cut_frames = round(exact_left_cut)
+            # round() 比 int() 可能多裁/少裁，补偿到 total_frames 使内容帧数不变
+            # 推导：int 版实际 = budget - int(cut)；round 版 = (budget+adj) - round(cut) = budget - int(cut)
+            total_frames += left_cut_frames - int(exact_left_cut)
             if left_cut_frames < mel_out.shape[1]:
                 mel_out = mel_out[:, left_cut_frames:]
                 target_con_frames = max(0, target_con_frames - left_cut_frames)
@@ -257,7 +266,10 @@ class Fragment:
                 mel_out = np.empty((n_mels, 0))
                 target_con_frames = 0
         elif pre_to_left_ms < 0:
-            left_pad_frames = int(-pre_to_left_ms / self.ms_per_frame)
+            exact_left_pad = -pre_to_left_ms / self.ms_per_frame
+            left_pad_frames = round(exact_left_pad)
+            # 补白 case 补偿符号与裁剪相反
+            total_frames -= left_pad_frames - int(exact_left_pad)
             blank = np.full((n_mels, left_pad_frames),
                             np.log(1e-5), dtype=mel_out.dtype)
             # 渐入：用 4 帧从空白平滑过渡到真实音频，避免 HiFi-GAN 解码硬切换噪声
@@ -301,6 +313,15 @@ class Fragment:
                     print(f"  P={P}: {info['phoneme_name']} "
                           f"cur={cur_rms:.4f} target={target_rms_actual:.4f} (x{scale:.4f})")
 
+        # ── hop=512 帧误差补偿（累积到下一个音素） ──
+        # 拼接器的 _encode_one 做 int(mel.shape[1] * 64/512)，截断误差通过 carry 传递
+        actual_frames = mel_out.shape[1]
+        hop_ratio = self.hop_length / 512  # 64/512 = 0.125
+        hop512_ideal = actual_frames * hop_ratio
+        hop512_with_carry = hop512_ideal + self._frame_error_hop512
+        hop512_trunc = int(hop512_with_carry)
+        self._frame_error_hop512 = hop512_with_carry - hop512_trunc
+
         info['mel'] = mel_out
         info['audio_seg'] = audio_seg
         info['consonant_frames'] = target_con_frames
@@ -334,6 +355,7 @@ class Fragment:
     # ─── 主入口 ───
     def cut_audio(self, max_workers: int = 1):
         """串行处理所有音素。"""
+        self._frame_error_hop512 = 0.0  # 每次合成重置 hop=512 误差累积器
         for i in range(len(self.phoneme_list)):
             self._process_single_phoneme(i)
 
