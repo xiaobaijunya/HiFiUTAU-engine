@@ -179,30 +179,27 @@ class Fragment:
         p4_x = info['envelope']['p4']['x']
         # p0_x、stretch_factor、stretched_preutter、pre_to_left_ms 已在前面提前计算
 
-        # ── 内容帧数（p0→p4），与 VEL 无关 ──
-        # 包络决定的内容长度：p4_x - p0_x 是固定值，VEL 只改变 preutter 位置
-        # 先算内容帧数，再加裁剪/补白得到总拉伸帧数，保证内容不随 VEL 漂移
-        content_exact = (p4_x - p0_x) / self.ms_per_frame
-        content_frames = max(round(content_exact), 1)
+        # ── 总拉伸帧数 = 总时间预算四舍五入 ──
+        # VEL 改变 stretched_preutter → 改变 total_budget_ms
+        # round() 而非 int()，使截断误差在 ±0.5 帧均匀分布，不系统性偏短
+        total_budget_ms = p4_x + stretched_preutter
+        total_frames = max(round(total_budget_ms / self.ms_per_frame), 1)
 
         # 辅音帧数（拉伸后，四舍五入）
         target_con_frames = max(1, round(con_frames_orig * stretch_factor))
-        target_con_frames = min(target_con_frames, content_frames - 1)
+        target_con_frames = min(target_con_frames, total_frames - 1)
 
-        # 元音帧数 = 内容帧数 - 辅音帧数
-        target_vow_frames = content_frames - target_con_frames
+        # 元音帧数 = 总帧数 - 辅音帧数
+        target_vow_frames = total_frames - target_con_frames
 
-        # 总拉伸帧数 = 内容帧数 + 左侧裁剪/补白（左侧由 VEL 决定）
+        # 左侧裁剪/补白帧数（供后续使用，四舍五入）
         if pre_to_left_ms > 0:
             exact_left_cut = pre_to_left_ms / self.ms_per_frame
             left_cut_frames = round(exact_left_cut)
-            total_frames = content_frames + left_cut_frames
         elif pre_to_left_ms < 0:
             exact_left_pad = -pre_to_left_ms / self.ms_per_frame
             left_pad_frames = round(exact_left_pad)
-            total_frames = content_frames  # 先拉伸内容，后面再补白
-        else:
-            total_frames = content_frames
+        # else: 无需裁剪也无需补白
 
         # ── strt=1: 参考 He 标志 — 用 np.pad(mode='reflect') 做正反循环 ──
         # 原理：元音部分用 reflect padding 扩展，插值自然走正反循环
@@ -267,7 +264,7 @@ class Fragment:
         if pre_to_left_ms > 0:
             exact_left_cut = pre_to_left_ms / self.ms_per_frame
             left_cut_frames = round(exact_left_cut)
-            # total_frames 已在上面设为 content_frames + left_cut_frames，无需补偿
+            # total_frames = round((p4+sp)/ms) 已包含左侧部分，直接裁剪
             if left_cut_frames < mel_out.shape[1]:
                 mel_out = mel_out[:, left_cut_frames:]
                 target_con_frames = max(0, target_con_frames - left_cut_frames)
