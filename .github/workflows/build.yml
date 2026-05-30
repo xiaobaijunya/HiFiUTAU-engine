@@ -5,7 +5,7 @@
 # 手动触发时可指定版本号、是否为正式发布等。
 #
 # 产物:
-#   Windows CPU  → hifiserver_cpu.exe   → hifiserver-win-x64-{version}.zip
+#   Windows DML → hifiserver_dml.exe   → hifiserver-win-x64-{version}.zip
 #   Linux x64    → hifiserver_linux     → hifiserver-linux-x64-{version}.zip
 #   macOS ARM    → hifiserver_macos     → hifiserver-osx-arm64-{version}.zip
 # =============================================================================
@@ -44,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         arch:
-          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_cpu.spec,  output: hifiserver_cpu }
+          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_dml.spec,  output: hifiserver_dml }
           - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: hifiserver_linux.spec, output: hifiserver_linux }
           - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: hifiserver_macos.spec, output: hifiserver_macos }
 
@@ -92,6 +92,19 @@ jobs:
             pip install --only-binary :all: llvmlite
           fi
           pip install -r requirements.txt
+
+      # ── 5b. 安装 ONNX 运行时（各平台独立）──
+      - name: Install ONNX Runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pip install onnxruntime-directml
+
+      - name: Install ONNX Runtime (Linux / macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          pip install onnxruntime
 
       # ── 6. 下载 ONNX 模型 ──
       - name: Download ONNX models
@@ -170,7 +183,7 @@ jobs:
 
             | 平台 | 文件 | 说明 |
             |------|------|------|
-            | 🪟 Windows | `hifiserver-win-x64-${{ inputs.version }}.zip` | CPU 推理 |
+            | 🪟 Windows | `hifiserver-win-x64-${{ inputs.version }}.zip` | DML 推理 (DirectML) |
             | 🐧 Linux | `hifiserver-linux-x64-${{ inputs.version }}.zip` | CPU 推理 |
             | 🍎 macOS | `hifiserver-osx-arm64-${{ inputs.version }}.zip` | CPU 推理 (Apple Silicon) |
 
