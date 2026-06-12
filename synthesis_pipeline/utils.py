@@ -27,6 +27,9 @@ def read_audio(loc: str, sr: int | None = None) -> np.ndarray:
     # ── 方案1: soundfile（原生支持 WAV/FLAC/OGG，打包兼容性好）──
     try:
         x, fs = _sf.read(loc, dtype='float32', always_2d=False)
+        # 立体声/多声道转单声道
+        if x.ndim > 1:
+            x = x.mean(axis=1)
         if sr is not None and fs != sr:
             x = _librosa.resample(x, orig_sr=fs, target_sr=sr)
         return x.astype(np.float32)
