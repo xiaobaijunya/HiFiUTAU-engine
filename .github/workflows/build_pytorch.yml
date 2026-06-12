@@ -42,9 +42,9 @@ jobs:
       fail-fast: false
       matrix:
         arch:
-          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_pytorch.spec,         output: hifiserver_pytorch }
-          - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: hifiserver_pytorch_linux.spec,  output: hifiserver_pytorch }
-          - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: hifiserver_pytorch_macos.spec,  output: hifiserver_pytorch }
+          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: build/hifiserver_pytorch.spec,         output: hifiserver_pytorch }
+          - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: build/hifiserver_pytorch_linux.spec,  output: hifiserver_pytorch }
+          - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: build/hifiserver_pytorch_macos.spec,  output: hifiserver_pytorch }
 
     runs-on: ${{ matrix.arch.runs-on }}
     timeout-minutes: 60

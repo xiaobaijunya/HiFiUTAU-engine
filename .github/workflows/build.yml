@@ -44,9 +44,9 @@ jobs:
       fail-fast: false
       matrix:
         arch:
-          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: hifiserver_dml.spec,  output: hifiserver_dml }
-          - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: hifiserver_linux.spec, output: hifiserver_linux }
-          - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: hifiserver_macos.spec, output: hifiserver_macos }
+          - { name: win-x64,   os: win,  runs-on: windows-latest, spec: build/hifiserver_dml.spec,  output: hifiserver_dml }
+          - { name: linux-x64, os: linux,runs-on: ubuntu-latest,  spec: build/hifiserver_linux.spec, output: hifiserver_linux }
+          - { name: osx-arm64, os: osx,  runs-on: macos-latest,   spec: build/hifiserver_macos.spec, output: hifiserver_macos }
 
     runs-on: ${{ matrix.arch.runs-on }}
     timeout-minutes: 30

@@ -146,6 +146,16 @@ python http_syn2_pytorch.py
 ├── requirements.txt             # ONNX 模式依赖
 ├── requirements_pytorch.txt     # PyTorch 模式依赖
 │
+├── build/                       # PyInstaller 打包配置
+│   ├── hifiserver_cpu.spec      #   CPU 版
+│   ├── hifiserver_dml.spec      #   DML 版
+│   ├── hifiserver_linux.spec    #   Linux 版
+│   ├── hifiserver_macos.spec    #   macOS 版
+│   ├── hifiserver_pytorch.spec  #   PyTorch 版 (Windows)
+│   ├── hifiserver_pytorch_linux.spec
+│   ├── hifiserver_pytorch_macos.spec
+│   └── runtime_hook.py          #   运行时钩子
+│
 ├── synthesis_pipeline/          # 合成管线（核心处理逻辑）
 │   ├── engine.py                # 合成引擎（调度管线）
 │   ├── fragment.py              # 音素片段处理（音频切割、mel 转换、时间拉伸）
