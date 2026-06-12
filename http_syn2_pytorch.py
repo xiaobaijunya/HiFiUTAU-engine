@@ -1,5 +1,5 @@
 """
-hifisampler HTTP 服务 — PyTorch 推理版
+hifiutau-engine HTTP 服务 — PyTorch 推理版
 
 使用原生 PyTorch 进行合成，替代复杂的 ONNX Runtime + TensorRT/DirectML 链路。
 用法:  python http_syn2_pytorch.py
@@ -49,13 +49,13 @@ if __name__ == '__main__':
     import os as _os
 
     # 从环境变量读取优化选项
-    _compile = _os.environ.get('HIFISAMPLER_COMPILE', '0') == '1'
-    _fp16 = _os.environ.get('HIFISAMPLER_FP16', '0') == '1'
+    _compile = _os.environ.get('HIFIUTAU_ENGINE_COMPILE', '0') == '1'
+    _fp16 = _os.environ.get('HIFIUTAU_ENGINE_FP16', '0') == '1'
 
     print(f"正在预加载 PyTorch 模型 (device={DEVICE})...")
     print(f"  优化: compile={_compile}, fp16={_fp16}")
-    print(f"  提示: 设置环境变量 HIFISAMPLER_COMPILE=1 启用 torch.compile")
-    print(f"        设置环境变量 HIFISAMPLER_FP16=1 启用 FP16 推理")
+    print(f"  提示: 设置环境变量 HIFIUTAU_ENGINE_COMPILE=1 启用 torch.compile")
+    print(f"        设置环境变量 HIFIUTAU_ENGINE_FP16=1 启用 FP16 推理")
 
     try:
         preload_all(device=DEVICE, compile_model=_compile, fp16=_fp16)
@@ -65,8 +65,8 @@ if __name__ == '__main__':
 提示：需要将 PyTorch checkpoint 放到正确位置。
 方法1: 将 pc_nsf_hifigan_44.1k_hop512_128bin_2025.02 文件夹（含 model.ckpt 和 config.json）
        复制到工作目录
-方法2: 设置环境变量 HIFISAMPLER_CKPT 指向 model.ckpt 路径
-       $env:HIFISAMPLER_CKPT = "D:\\models\\pc_nsf_hifigan\\model.ckpt"
+方法2: 设置环境变量 HIFIUTAU_ENGINE_CKPT 指向 model.ckpt 路径
+       $env:HIFIUTAU_ENGINE_CKPT = "D:\models\pc_nsf_hifigan\model.ckpt"
 """)
         exit(1)
     except Exception as e:

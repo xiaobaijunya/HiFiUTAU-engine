@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# hifisampler PyInstaller spec — Linux PyTorch 版
+# hifiutau-engine PyInstaller spec — Linux PyTorch 版
 # 由 GitHub Actions CI (ubuntu-latest) 自动构建
 
 import os

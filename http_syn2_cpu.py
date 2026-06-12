@@ -1,5 +1,5 @@
 """
-hifisampler HTTP 服务 — CPU / DML Worker Pool 版本
+hifiutau-engine HTTP 服务 — CPU / DML Worker Pool 版本
 
 CPU 模式: 直接在当前进程合成（同原版逻辑）
 DML 模式: 启动 N 个独立工作进程，每个预加载 ONNX(DML) 模型，

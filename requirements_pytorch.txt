@@ -1,4 +1,4 @@
-# hifisampler PyTorch 依赖 — 全平台通用
+# hifiutau-engine PyTorch 依赖 — 全平台通用
 # 使用此文件替换 requirements.txt 以构建纯 PyTorch 版本（无 ONNX Runtime）
 flask>=3.0
 numpy>=1.24

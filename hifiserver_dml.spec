@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# hifisampler PyInstaller spec — Windows DML 版
+# hifiutau-engine PyInstaller spec — Windows DML 版
 # 依赖: pip install onnxruntime-directml
 
 import os

@@ -1,4 +1,4 @@
-# hifisampler 运行配置
+# hifiutau-engine 运行配置
 # device: cpu 或 dml（强制，不可用则报错，不自动回退）
 device=cpu
 # DML 工作进程数量（仅在 device=dml 时有效）

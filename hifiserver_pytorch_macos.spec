@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# hifisampler PyInstaller spec — macOS PyTorch 版 (Apple Silicon)
+# hifiutau-engine PyInstaller spec — macOS PyTorch 版 (Apple Silicon)
 # 由 GitHub Actions CI (macos-latest) 自动构建
 
 import os

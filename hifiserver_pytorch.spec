@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-# hifisampler PyInstaller spec — PyTorch 推理版
+# hifiutau-engine PyInstaller spec — PyTorch 推理版
 #
 # 打包命令:
 #   pyinstaller hifiserver_pytorch.spec
 #
 # 注意:
 #   - 需要先将 pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/ 复制到打包目录
-#   - 或打包后通过 HIFISAMPLER_CKPT 环境变量指定 checkpoint 路径
+#   - 或打包后通过 HIFIUTAU_ENGINE_CKPT 环境变量指定 checkpoint 路径
 
 import os
 import sys

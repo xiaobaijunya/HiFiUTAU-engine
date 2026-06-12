@@ -1,5 +1,5 @@
 """
-hifisampler PyTorch 合成入口 — 模型加载 + 合成调度。
+hifiutau-engine PyTorch 合成入口 — 模型加载 + 合成调度。
 
 与 main_onnx.py 接口完全兼容，但使用原生 PyTorch 推理。
 模型在此文件中加载&缓存，合成逻辑委托给 synthesis_pipeline。
@@ -51,7 +51,7 @@ def get_hnsep_model() -> PytorchHnsep | None:
 #  预加载
 # ═══════════════════════════════════════════════════════════════
 
-# PyTorch checkpoint 路径（默认路径，可通过环境变量 HIFISAMPLER_CKPT 覆盖）
+# PyTorch checkpoint 路径（默认路径，可通过环境变量 HIFIUTAU_ENGINE_CKPT 覆盖）
 _DEFAULT_CKPT_DIR = r"pc_nsf_hifigan_44.1k_hop512_128bin_2025.02"
 _DEFAULT_CKPT = os.path.join(_DEFAULT_CKPT_DIR, "model.ckpt")
 _DEFAULT_CONFIG = os.path.join(_DEFAULT_CKPT_DIR, "config.json")
@@ -62,13 +62,13 @@ _FALLBACK_CONFIG = r"exported_onnx_v2/config.json"
 
 def _resolve_ckpt_path() -> str:
     """解析 checkpoint 路径，优先使用环境变量。"""
-    env_ckpt = os.environ.get("HIFISAMPLER_CKPT")
+    env_ckpt = os.environ.get("HIFIUTAU_ENGINE_CKPT")
     if env_ckpt and os.path.isfile(env_ckpt):
         return env_ckpt
     if os.path.isfile(_DEFAULT_CKPT):
         return _DEFAULT_CKPT
     raise FileNotFoundError(
-        f"找不到 PyTorch checkpoint。请设置环境变量 HIFISAMPLER_CKPT "
+        f"找不到 PyTorch checkpoint。请设置环境变量 HIFIUTAU_ENGINE_CKPT "
         f"指向 model.ckpt 文件，或确保以下路径存在：\n"
         f"  {_DEFAULT_CKPT}"
     )
@@ -172,8 +172,8 @@ def synthesize_audio(json_data: dict, *, test: bool = False,
         WAV bytes
     """
     # 从环境变量读取优化选项
-    compile_model = os.environ.get('HIFISAMPLER_COMPILE', '0') == '1'
-    fp16 = os.environ.get('HIFISAMPLER_FP16', '0') == '1'
+    compile_model = os.environ.get('HIFIUTAU_ENGINE_COMPILE', '0') == '1'
+    fp16 = os.environ.get('HIFIUTAU_ENGINE_FP16', '0') == '1'
 
     splicer = get_splicer(
         _resolve_ckpt_path(),

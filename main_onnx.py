@@ -1,5 +1,5 @@
 ﻿"""
-hifisampler ONNX 合成入口 — 模型加载 + 合成调度。
+hifiutau-engine ONNX 合成入口 — 模型加载 + 合成调度。
 
 模型在此文件中加载&缓存，合成逻辑委托给 synthesis_pipeline。
 """

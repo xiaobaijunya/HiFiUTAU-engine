@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# hifisampler PyInstaller spec — CPU 版
+# hifiutau-engine PyInstaller spec — CPU 版
 
 import os
 
