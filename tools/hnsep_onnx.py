@@ -206,10 +206,3 @@ def hnsep_separate(waveform: np.ndarray, session=None) -> tuple:
     return _global_hnsep_instance.separate(waveform)
 
 
-def apply_breath_tension(waveform, breath=100, voicing=100, tension=0, session=None):
-    """向后兼容：应用 breath/tension 后处理。"""
-    global _global_hnsep_instance
-    if _global_hnsep_instance is None:
-        _global_hnsep_instance = OnnxHnsep()
-    return _global_hnsep_instance.apply_breath_tension(
-        waveform, breath=breath, voicing=voicing, tension=tension)

@@ -25,7 +25,6 @@ if _parent_dir not in sys.path:
 
 from tools.base_splicer import BaseSplicer
 from tools.nsf_hifigan import SplitGenerator, AttrDict
-from tools.utils import init_weights, get_padding
 
 
 class PytorchHiddenSplicer(BaseSplicer):

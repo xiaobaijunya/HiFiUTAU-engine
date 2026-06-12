@@ -31,7 +31,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         'torch',
-        'torchaudio',
         'torchvision',
         'matplotlib',
         'pandas',

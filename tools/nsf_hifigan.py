@@ -14,48 +14,7 @@ from tools.utils import AttrDict, init_weights, get_padding
 LRELU_SLOPE = 0.1
 
 
-def load_model(model_path: pathlib.Path):
-    config_file = model_path.with_name('config.json')
-    with open(config_file) as f:
-        data = f.read()
 
-    json_config = json.loads(data)
-    h = AttrDict(json_config)
-
-    generator = Generator(h)
-
-    cp_dict = torch.load(model_path, map_location='cpu')
-    generator.load_state_dict(cp_dict['generator'])
-    generator.eval()
-    generator.remove_weight_norm()
-    del cp_dict
-    return generator, h
-
-class NsfHifiGAN:
-    def __init__(self, model_path):
-        print(f'Loading HifiGAN: {model_path}')
-        self.model, self.h = load_model(model_path)
-
-    @property
-    def device(self):
-        return next(self.model.parameters()).device
-
-    def to_device(self, device):
-        self.model.to(device)
-
-    def get_device(self):
-        return self.device
-
-    def spec2wav_torch(self, mel, **kwargs): 
-        with torch.no_grad():
-            c = mel  # [B, T, bins]
-            f0 = kwargs.get('f0')  # [B, T]
-            if f0 is not None:
-                y = self.model(c, f0).view(-1)
-            else:
-                y = self.model(c).view(-1)
-        return y
-    
 class ResBlock1(torch.nn.Module):
     def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5)):
         super(ResBlock1, self).__init__()
@@ -450,21 +409,3 @@ class SplitGenerator(torch.nn.Module):
             l.remove_weight_norm()
         remove_parametrizations(self.conv_pre, "weight")
         remove_parametrizations(self.conv_post, "weight")
-
-def load_split_model(model_path: pathlib.Path):
-    """加载拆分后的模型"""
-    config_file = model_path.with_name('config.json')
-    with open(config_file) as f:
-        data = f.read()
-    
-    json_config = json.loads(data)
-    h = AttrDict(json_config)
-    
-    generator = SplitGenerator(h)
-    
-    cp_dict = torch.load(model_path, map_location='cpu')
-    generator.load_state_dict(cp_dict['generator'])
-    generator.eval()
-    generator.remove_weight_norm()
-    del cp_dict
-    return generator, h

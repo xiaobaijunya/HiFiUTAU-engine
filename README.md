@@ -155,13 +155,14 @@ python http_syn2_pytorch.py
 │   └── utils.py                 # 工具函数
 │
 ├── tools/                       # 工具模块
+│   ├── base_splicer.py          # 隐空间拼接基类
+│   ├── base_hnsep.py            # HN-SEP 基类
 │   ├── hidden_splicer.py        # ONNX HiddenSplicer（隐空间拼接）
 │   ├── pytorch_splicer.py       # PyTorch HiddenSplicer
 │   ├── hnsep_onnx.py            # HN-SEP ONNX 推理
 │   ├── hnsep_pytorch.py         # HN-SEP PyTorch 推理
-│   ├── nsf_hifigan.py           # HiFiGAN 模型定义
-│   ├── hifigan.py               # HiFiGAN 工具函数
-│   └── ...
+│   ├── nsf_hifigan.py           # HiFiGAN 模型定义（SplitGenerator）
+│   ├── utils.py                 # 工具函数（AttrDict, init_weights）
 │
 ├── hnsep_onnx/                  # HN-SEP ONNX 模型
 ├── hnsep/                       # HN-SEP PyTorch 模型

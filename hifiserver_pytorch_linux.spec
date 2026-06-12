@@ -57,7 +57,6 @@ a = Analysis(
         'tensorflow',
         'keras',
         'torchvision',
-        'torchaudio',
     ],
     cipher=block_cipher,
     noarchive=False,

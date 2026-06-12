@@ -66,7 +66,6 @@ a = Analysis(
         'tensorflow',
         'keras',
         'torchvision',
-        'torchaudio',
         # PyTorch 的 MKL 等可以进一步裁剪（可选）
     ],
     win_no_prefer_redirects=False,

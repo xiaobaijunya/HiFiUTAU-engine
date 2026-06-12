@@ -66,7 +66,7 @@ if __name__ == '__main__':
 方法1: 将 pc_nsf_hifigan_44.1k_hop512_128bin_2025.02 文件夹（含 model.ckpt 和 config.json）
        复制到工作目录
 方法2: 设置环境变量 HIFIUTAU_ENGINE_CKPT 指向 model.ckpt 路径
-       $env:HIFIUTAU_ENGINE_CKPT = "D:\models\pc_nsf_hifigan\model.ckpt"
+       $env:HIFIUTAU_ENGINE_CKPT = "D:\\models\\pc_nsf_hifigan\\model.ckpt"
 """)
         exit(1)
     except Exception as e:
