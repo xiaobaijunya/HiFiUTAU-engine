@@ -9,6 +9,7 @@ import onnxruntime
 
 from tools.hidden_splicer import HiddenSplicer
 from synthesis_pipeline import SynthesisEngine
+from util.wav2mel import PitchAndTimeAdjustableMelSpectrogram
 
 
 # ============================================================================
@@ -110,7 +111,8 @@ def synthesize_audio(json_data: dict, *, test: bool = False,
     )
     hnsep = get_hnsep_session()
 
-    engine = SynthesisEngine(splicer=splicer, hnsep_session=hnsep)
+    mel_exc = PitchAndTimeAdjustableMelSpectrogram()
+    engine = SynthesisEngine(splicer=splicer, hnsep_session=hnsep, mel_exc=mel_exc)
     return engine.synthesize(json_data, test=test, max_workers=max_workers)
 
 

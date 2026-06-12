@@ -32,6 +32,7 @@ class BaseSplicer:
 
         self.model_hop = config['hop_size']              # 512
         self.sample_rate = config['sampling_rate']       # 44100
+        self.spm = self.sample_rate / 1000.0
         self.ms_per_frame_model = self.model_hop / self.sample_rate * 1000
 
         # part1 上采样倍数: 前两层 upsample_rates 乘积 (8*8=64)
@@ -358,3 +359,59 @@ class BaseSplicer:
 
         combined_feat = np.concatenate(feat_segments, axis=2)
         return self.synthesize(combined_feat, f0_np)
+
+    # ─── mel 域拼接（SPLC=1 使用） ──────────────────────────
+
+    def splice_and_synthesize_mel(self, phoneme_list, f0_np):
+        """在 mel 域通过包络 gain 叠加拼接（SPLC=1 专用）。"""
+        n = len(phoneme_list)
+
+        max_mel_len = phoneme_list[-1]['mel_end'] + 1
+        mel_dim = phoneme_list[-1]['mel'].shape[0]
+        total_mel_energy = np.zeros((mel_dim, max_mel_len), dtype=np.float32)
+
+        for i in range(n):
+            phoneme = phoneme_list[i]
+            env = phoneme['envelope']
+            p0_y = env['p0']['y']
+            p4_y = env['p4']['y']
+            if i == 0:
+                p0_y = 100
+            if i == n - 1:
+                p4_y = 100
+
+            preutter = phoneme['preutter']
+            x0 = preutter + env['p0']['x'] * self.spm
+            x1 = preutter + env['p1']['x'] * self.spm
+            x2 = preutter + env['p2']['x'] * self.spm
+            x3 = preutter + env['p3']['x'] * self.spm
+            x4 = preutter + env['p4']['x'] * self.spm
+
+            y0 = p0_y / 100
+            y1 = env['p1']['y'] / 100
+            y2 = env['p2']['y'] / 100
+            y3 = env['p3']['y'] / 100
+            y4 = p4_y / 100
+
+            gain = np.interp(phoneme['h_points'],
+                             [x0, x1, x2, x3, x4],
+                             [y0, y1, y2, y3, y4])
+            mel = np.exp(phoneme['mel'] * 2) * gain
+
+            start = phoneme['mel_offset']
+            stop = start + mel.shape[1]
+            clip_start = max(start, 0)
+            src_start = clip_start - start
+            total_mel_energy[:, clip_start:stop] += mel[:, src_start:]
+
+        total_mel_log = np.log(np.maximum(total_mel_energy, 1e-12)) / 2
+
+        # 对齐 F0
+        f0_np = f0_np[:max_mel_len]
+        if len(f0_np) < max_mel_len:
+            f0_np = np.pad(f0_np, (0, max_mel_len - len(f0_np)), mode='edge')
+
+        f0_pad  = np.pad(f0_np, (self.front_pad_frames, self.tail_pad_frames), mode='edge')
+        mel_pad = np.pad(total_mel_log, ((0, 0), (self.front_pad_frames, self.tail_pad_frames)), mode='edge')
+        combined_feat = self.part1_encode(mel_pad)
+        return self.part2_synthesize(combined_feat, f0_pad)

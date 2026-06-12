@@ -7,6 +7,7 @@ import numpy as np
 import soundfile as sf
 
 from synthesis_pipeline.fragment import Fragment
+from synthesis_pipeline.fragment_mel import FragmentMel
 from synthesis_pipeline.post_process import apply_hnsep_postprocess
 from synthesis_pipeline.growl import apply_growl
 from synthesis_pipeline.tension_filter import apply_dynamic_lowcut
@@ -24,14 +25,16 @@ class SynthesisEngine:
         wav_bytes = engine.synthesize(json_data)
     """
 
-    def __init__(self, splicer, hnsep_session=None):
+    def __init__(self, splicer, hnsep_session=None, mel_exc=None):
         """
         Args:
             splicer:        HiddenSplicer 实例（已加载 ONNX 模型）
             hnsep_session:  HN-SEP ONNX 推理会话（可选）
+            mel_exc:        PitchAndTimeAdjustableMelSpectrogram（SPLC=1 时使用）
         """
         self._splicer = splicer
         self._hnsep = hnsep_session
+        self._mel_exc = mel_exc
 
     # ─── 属性（只读） ───
     @property
@@ -58,7 +61,19 @@ class SynthesisEngine:
         """
         t_start = time.time()
 
-        # ── 1. Fragment 初始化 ──
+        # 检查是否有 SPLC=1 音素，决定使用哪种管线
+        use_mel_pipeline = any(
+            info.get('Note_flags', {}).get('splc', 0) == 1
+            for info in json_data['phoneme_list'].values()
+        )
+
+        if use_mel_pipeline and self._mel_exc is not None:
+            return self._synthesize_mel(json_data, test, max_workers, t_start)
+        else:
+            return self._synthesize_feat(json_data, test, max_workers, t_start)
+
+    def _synthesize_feat(self, json_data: dict, test: bool, max_workers: int, t_start: float) -> bytes:
+        """SPLC=0: 标准 feat 域隐空间拼接管线。"""
         frag = Fragment(json_data)
         print(f"输出: {frag.out_wav} | 时长: {frag.wav_dur}ms | "
               f"音素数: {len(frag.phoneme_list)}")
@@ -68,14 +83,10 @@ class SynthesisEngine:
               f"growl={len(frag.growl)}帧, "
               f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧")
 
-        # ── 2. 音频切割 + mel（多线程） ──
         frag.cut_audio(max_workers=max_workers)
-
-        # ── 3. 音量匹配 + gen ──
         frag.adjust_volume_by_phtp()
         frag.apply_dynamic_gen_to_mels()
 
-        # ── 3b. VOL（放在 phtp→gen 之后，最后应用到 mel） ──
         for info in frag.phoneme_list:
             vol = info.get('Note_flags', {}).get('vol', 100)
             gain = vol / 100.0
@@ -83,29 +94,54 @@ class SynthesisEngine:
                 info['mel'] = info['mel'] + np.log(gain)
                 print(f"  VOL: {info['phoneme_name']} x{gain:.4f}")
 
-        # ── 4. F0 ──
         f0 = np.array(frag.pit, dtype=np.float32)
         target_hop = 512
         print(f"重采样 F0: {len(f0)} 帧 -> ", end="")
         f0 = resample_array(f0, frag.Dynamic_hop, target_hop)
         print(f"{len(f0)} 帧")
 
-        # ── 5. 隐空间拼接 + 合成 ──
-        # 检查是否有音素使用了 splc=1 标志（mel 域能量拼接）
-        use_mel_crossfade = any(
-            info.get('Note_flags', {}).get('splc', 0) == 1
-            for info in frag.phoneme_list
+        print("隐空间混合拼接 (feat 域)...")
+        wav = self._splicer.splice_and_synthesize(
+            frag.phoneme_list, frag.ms_per_frame, frag.hop_length, f0
         )
-        if use_mel_crossfade:
-            print("隐空间混合拼接 (混合模式: mel 域+feat 域)...")
-            wav = self._splicer.splice_and_synthesize_mixed(
-                frag.phoneme_list, frag.ms_per_frame, frag.hop_length, f0
-            )
-        else:
-            print("隐空间混合拼接...")
-            wav = self._splicer.splice_and_synthesize(
-                frag.phoneme_list, frag.ms_per_frame, frag.hop_length, f0
-            )
+
+        return self._postprocess(wav, frag, t_start, test)
+
+    def _synthesize_mel(self, json_data: dict, test: bool, max_workers: int, t_start: float) -> bytes:
+        """SPLC=1: mel 域能量叠加拼接管线。"""
+        frag = FragmentMel(json_data, self._mel_exc)
+        print(f"输出: {frag.out_wav} | 时长: {frag.wav_dur}ms | "
+              f"音素数: {len(frag.phoneme_list)}")
+        print(f"动态参数: tension={len(frag.tension)}帧, "
+              f"breath={len(frag.breath)}帧, "
+              f"voicing={len(frag.voicing)}帧, "
+              f"growl={len(frag.growl)}帧, "
+              f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧")
+        print("拼接模式: mel 域能量叠加 (SPLC=1)")
+
+        frag.cut_audio(max_workers=max_workers)
+        frag.adjust_volume_by_phtp()
+        frag.apply_dynamic_gen_to_mels()
+
+        for info in frag.phoneme_list:
+            vol = info.get('Note_flags', {}).get('vol', 100)
+            gain = vol / 100.0
+            if abs(gain - 1.0) > 1e-6 and info.get('mel') is not None and info['mel'].shape[1] > 0:
+                info['mel'] = info['mel'] + np.log(gain)
+                print(f"  VOL: {info['phoneme_name']} x{gain:.4f}")
+
+        f0 = np.array(frag.pit, dtype=np.float32)
+        target_hop = 512
+        print(f"重采样 F0: {len(f0)} 帧 -> ", end="")
+        f0 = resample_array(f0, frag.Dynamic_hop, target_hop)
+        print(f"{len(f0)} 帧")
+
+        wav = self._splicer.splice_and_synthesize_mel(frag.phoneme_list, f0)
+
+        return self._postprocess(wav, frag, t_start, test)
+
+    def _postprocess(self, wav, frag, t_start, test):
+        """HN-SEP 后处理 + WAV 输出（两管线共用）。"""
 
         # ── 6. HN-SEP 后处理 ──
         # 波形已包含首尾补帧，动态参数需同步补齐再传入

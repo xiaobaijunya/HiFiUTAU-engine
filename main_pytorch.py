@@ -13,6 +13,7 @@ import torch
 from tools.pytorch_splicer import PytorchHiddenSplicer
 from tools.hnsep_pytorch import PytorchHnsep
 from synthesis_pipeline import SynthesisEngine
+from util.wav2mel import PitchAndTimeAdjustableMelSpectrogram
 
 
 # ============================================================================
@@ -182,7 +183,8 @@ def synthesize_audio(json_data: dict, *, test: bool = False,
     )
     hnsep = get_hnsep_model()
 
-    engine = SynthesisEngine(splicer=splicer, hnsep_session=hnsep)
+    mel_exc = PitchAndTimeAdjustableMelSpectrogram()
+    engine = SynthesisEngine(splicer=splicer, hnsep_session=hnsep, mel_exc=mel_exc)
     return engine.synthesize(json_data, test=test, max_workers=max_workers)
 
 
