@@ -52,7 +52,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['runtime_hook.py'],
+    runtime_hooks=[os.path.join(os.path.dirname(__file__), 'runtime_hook.py')],
     excludes=[
         # 排除 ONNX Runtime（PyTorch 版不需要）
         'onnxruntime',
