@@ -120,7 +120,8 @@ jobs:
           }
           # 复制运行配置到 exe 旁边
           Copy-Item "run_config.txt" (Join-Path $outDir "run_config.txt")
-          Write-Output "Copied run_config.txt to $outDir"
+          Copy-Item "使用说明.txt" (Join-Path $outDir "使用说明.txt") -ErrorAction SilentlyContinue
+          Write-Output "Copied extra files to $outDir"
 
       # ── 9. 打包为 zip ──
       - name: Create release zip

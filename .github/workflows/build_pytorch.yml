@@ -147,6 +147,10 @@ jobs:
               Write-Output "Copied $_ to $outDir"
             }
           }
+          # 复制配置文件和使用说明
+          Copy-Item "run_config.txt" (Join-Path $outDir "run_config.txt") -ErrorAction SilentlyContinue
+          Copy-Item "使用说明.txt" (Join-Path $outDir "使用说明.txt") -ErrorAction SilentlyContinue
+          Write-Output "Copied extra files to $outDir"
 
       # ── 10. 上传 Artifact ──
       - name: Upload artifact
