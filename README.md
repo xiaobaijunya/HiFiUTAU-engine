@@ -52,10 +52,10 @@ pip install -r requirements.txt
 
 ```bash
 # CPU 版
-pip install torch torchvision torchaudio
+pip install torch
 
 # CUDA 版（NVIDIA GPU，以下为 cu130 示例，请根据你的版本替换）
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+pip install torch --index-url https://download.pytorch.org/whl/cu130
 
 # 安装其他依赖
 pip install -r requirements_pytorch.txt

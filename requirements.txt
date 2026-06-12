@@ -12,6 +12,6 @@ pyinstaller>=6.0
 # onnxruntime>=1.17
 
 # PyTorch 推理版（http_syn2_pytorch.py / main_pytorch.py）
-# CUDA 版:  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-# CPU 版:   pip install torch torchvision torchaudio
+# CUDA 版:  pip install torch --index-url https://download.pytorch.org/whl/cu124
+# CPU 版:   pip install torch
 # 注意: PyTorch 版需要 pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt

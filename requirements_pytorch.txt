@@ -10,8 +10,8 @@ pyyaml>=6.0
 
 # PyTorch（CPU 版全平台通用）
 # CUDA 版（Windows 带 GPU 的机器）:
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
 # CPU 版（Linux / macOS / 无 GPU Windows）:
-#   pip install torch torchvision torchaudio
+#   pip install torch
 # 注意: 需要 pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt
 torch>=2.0
