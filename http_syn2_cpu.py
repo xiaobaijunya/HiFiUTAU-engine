@@ -16,14 +16,14 @@ import json
 import os
 import sys
 import time
-import warnings
+import logging
 import threading
 import multiprocessing
 import multiprocessing.connection
 from main_onnx import synthesize_audio, preload_all
 
 # 屏蔽 Werkzeug 开发服务器警告
-warnings.filterwarnings('ignore', message='.*development server.*')
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 CONFIG_FILE = 'run_config.txt'
 SERVER_PORT = 8000

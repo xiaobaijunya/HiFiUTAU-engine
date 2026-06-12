@@ -6,8 +6,8 @@ import os
 block_cipher = None
 
 a = Analysis(
-    ['http_syn2_cpu.py'],
-    pathex=[],
+    ['../http_syn2_cpu.py'],
+    pathex=['..'],
     binaries=[],
     datas=[],
     hiddenimports=[

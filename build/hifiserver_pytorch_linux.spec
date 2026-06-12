@@ -17,8 +17,8 @@ if os.path.isdir(_HNSEP_DIR):
     _datas.append((_HNSEP_DIR, _HNSEP_DIR))
 
 a = Analysis(
-    ['http_syn2_pytorch.py'],
-    pathex=[],
+    ['../http_syn2_pytorch.py'],
+    pathex=['..'],
     binaries=[],
     datas=_datas,
     hiddenimports=[

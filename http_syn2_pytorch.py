@@ -7,11 +7,11 @@ hifiutau-engine HTTP 服务 — PyTorch 推理版
 """
 from flask import Flask, request, Response
 import json
-import warnings
+import logging
 from main_pytorch import synthesize_audio, preload_all
 
 # 屏蔽 Werkzeug 开发服务器警告
-warnings.filterwarnings('ignore', message='.*development server.*')
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 DEVICE = 'cuda'
 app = Flask(__name__)
