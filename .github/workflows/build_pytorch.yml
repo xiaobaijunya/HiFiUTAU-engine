@@ -101,7 +101,31 @@ jobs:
           unzip -q pytorch_model.zip
           rm -f pytorch_model.zip
 
-      # ── 7. PyInstaller 打包 ──
+      # ── 7. 运行合成测试 ──
+      - name: Run synthesis test
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          # 后台启动服务
+          python http_syn2_pytorch.py &
+          SERVER_PID=$!
+          echo "Server PID: $SERVER_PID"
+          # 等待服务就绪
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8000 > /dev/null 2>&1; then
+              echo "Server ready"
+              break
+            fi
+            sleep 1
+          done
+          # 运行测试
+          python test/test.py || EXIT_CODE=$?
+          # 关闭服务
+          kill $SERVER_PID 2>/dev/null || true
+          exit ${EXIT_CODE:-0}
+
+      # ── 8. PyInstaller 打包 ──
       - name: Build with PyInstaller
         shell: pwsh
         run: |
@@ -110,7 +134,7 @@ jobs:
             --workpath build-${{ runner.os }} `
             --noconfirm
 
-      # ── 8. 复制模型到输出目录 ──
+      # ── 9. 复制模型到输出目录 ──
       - name: Copy models to dist
         shell: pwsh
         run: |
@@ -124,7 +148,7 @@ jobs:
             }
           }
 
-      # ── 9. 上传 Artifact ──
+      # ── 10. 上传 Artifact ──
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -132,7 +156,7 @@ jobs:
           path: dist/${{ matrix.arch.output }}/
           if-no-files-found: error
 
-      # ── 10. Release 时打包 zip ──
+      # ── 11. Release 时打包 zip ──
       - name: Create release zip (Windows)
         if: ${{ inputs.release && matrix.arch.os == 'win' }}
         shell: pwsh
@@ -147,7 +171,7 @@ jobs:
           cd dist/${{ matrix.arch.output }}
           zip -r ../../hifiserver-pytorch-${{ matrix.arch.name }}-${{ inputs.version }}.zip .
 
-      # ── 11. Release ──
+      # ── 12. Release ──
       - name: Release
         uses: softprops/action-gh-release@v2
         if: ${{ inputs.release }}

@@ -171,16 +171,14 @@ def synthesize_audio(json_data: dict, *, test: bool = False,
     Returns:
         WAV bytes
     """
-    # 从环境变量读取优化选项
-    compile_model = os.environ.get('HIFIUTAU_ENGINE_COMPILE', '0') == '1'
-    fp16 = os.environ.get('HIFIUTAU_ENGINE_FP16', '0') == '1'
+    # torch.compile 默认开启（可设 HIFIUTAU_ENGINE_COMPILE=0 关闭）
+    compile_model = os.environ.get('HIFIUTAU_ENGINE_COMPILE', '1') == '1'
 
     splicer = get_splicer(
         _resolve_ckpt_path(),
         _resolve_config_path(),
         device,
         compile_model=compile_model,
-        fp16=fp16,
     )
     hnsep = get_hnsep_model()
 

@@ -48,17 +48,13 @@ def receive_json():
 if __name__ == '__main__':
     import os as _os
 
-    # 从环境变量读取优化选项
-    _compile = _os.environ.get('HIFIUTAU_ENGINE_COMPILE', '0') == '1'
-    _fp16 = _os.environ.get('HIFIUTAU_ENGINE_FP16', '0') == '1'
+    # torch.compile 默认开启（可设 HIFIUTAU_ENGINE_COMPILE=0 关闭）
+    _compile = _os.environ.get('HIFIUTAU_ENGINE_COMPILE', '1') == '1'
 
-    print(f"正在预加载 PyTorch 模型 (device={DEVICE})...")
-    print(f"  优化: compile={_compile}, fp16={_fp16}")
-    print(f"  提示: 设置环境变量 HIFIUTAU_ENGINE_COMPILE=1 启用 torch.compile")
-    print(f"        设置环境变量 HIFIUTAU_ENGINE_FP16=1 启用 FP16 推理")
+    print(f"正在预加载 PyTorch 模型 (device={DEVICE}, compile={_compile})...")
 
     try:
-        preload_all(device=DEVICE, compile_model=_compile, fp16=_fp16)
+        preload_all(device=DEVICE, compile_model=_compile)
     except FileNotFoundError as e:
         print(f"[ERROR] {e}")
         print("""

@@ -119,14 +119,29 @@ jobs:
           unzip -q hifiserver_onnx.zip
           rm -f hifiserver_onnx.zip
 
-      # ── 7. 运行合成测试（模型就绪后立即验证管线）──
+      # ── 7. 运行合成测试 ──
       - name: Run synthesis test
         shell: bash
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          python test/test.py --dry-run
-          python test/test.py
+          # 后台启动服务
+          python http_syn2_cpu.py &
+          SERVER_PID=$!
+          echo "Server PID: $SERVER_PID"
+          # 等待服务就绪
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8000 > /dev/null 2>&1; then
+              echo "Server ready"
+              break
+            fi
+            sleep 1
+          done
+          # 运行测试
+          python test/test.py || EXIT_CODE=$?
+          # 关闭服务
+          kill $SERVER_PID 2>/dev/null || true
+          exit ${EXIT_CODE:-0}
 
       # ── 8. PyInstaller 打包 ──
       - name: Build with PyInstaller

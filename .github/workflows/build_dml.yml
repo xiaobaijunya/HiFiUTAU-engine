@@ -75,8 +75,26 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          python test/test.py --dry-run
+          # 后台启动服务
+          $job = Start-Job -ScriptBlock { python http_syn2_cpu.py }
+          # 等待服务就绪
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              $req = [System.Net.HttpWebRequest]::Create('http://localhost:8000')
+              $req.GetResponse() | Out-Null
+              Write-Output 'Server ready'
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+          # 运行测试
           python test/test.py
+          $exitCode = $LASTEXITCODE
+          # 关闭服务
+          Stop-Job $job
+          Remove-Job $job
+          exit $exitCode
 
       # ── 7. PyInstaller 打包 ──
       - name: Build with PyInstaller

@@ -1,195 +1,120 @@
 """
-hei.wav 完整参数测试
-
-使用 test_hei.json 进行合成，覆盖所有 Note_flags 和 Dynamic_parameter。
-支持 ONNX (cpu/dml/cuda) 和 PyTorch 两种后端。
+合成测试：向已运行的 HTTP 服务推送 test.json → 验证 WAV 输出。
 
 用法:
-    python test/test_hei.py                          # ONNX CPU (默认)
-    python test/test_hei.py --device cuda            # ONNX CUDA
-    python test/test_hei.py --pytorch                # PyTorch CUDA
-    python test/test_hei.py --pytorch --device cpu   # PyTorch CPU
-    python test/test_hei.py --dry-run                # 仅验证 JSON 结构
+    python test/test.py                              # 默认 localhost:8000
+    python test/test.py http://localhost:8000         # 指定服务地址
+    python test/test.py --dry-run                    # 仅检查依赖
 """
 
 import json
-import sys
 import os
-import argparse
+import sys
+import urllib.request
+import urllib.error
+import struct
 
-# 将项目根目录加入 path
-_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
-
-
-def validate_json(json_path: str) -> dict:
-    """验证 JSON 结构完整性。"""
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    required_top = ['hop_size', 'sample_rate', 'out_wav', 'phoneme_list']
-    for key in required_top:
-        assert key in data, f"缺少顶层字段: {key}"
-
-    assert isinstance(data['phoneme_list'], dict), "phoneme_list 必须是 dict"
-    assert len(data['phoneme_list']) > 0, "phoneme_list 不能为空"
-
-    for pid, info in data['phoneme_list'].items():
-        assert 'phoneme_name' in info, f"音素 {pid} 缺少 phoneme_name"
-        assert 'phoneme_oto' in info, f"音素 {pid} 缺少 phoneme_oto"
-        assert 'Note_flags' in info, f"音素 {pid} 缺少 Note_flags"
-        assert 'envelope' in info, f"音素 {pid} 缺少 envelope"
-
-        oto = info['phoneme_oto']
-        for k in ('audio_file_path', 'Offset', 'Consonant', 'Cutoff', 'Preutter', 'Overlap'):
-            assert k in oto, f"音素 {pid} phoneme_oto 缺少 {k}"
-
-        # 检查音频文件存在
-        wav_path = oto['audio_file_path']
-        abs_wav = os.path.join(_project_root, wav_path) if not os.path.isabs(wav_path) else wav_path
-        assert os.path.exists(abs_wav), f"音素 {pid} 音频文件不存在: {abs_wav}"
-
-    print(f"[OK] JSON 验证通过: {len(data['phoneme_list'])} 个音素")
-    return data
+SERVER_PORT = 8000
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEST_JSON = os.path.join('test/test.json')
+OUTPUT_WAV = os.path.join(BASE_DIR, 'test', 'test_out.wav')
 
 
-def run_onnx(json_path: str, device: str):
-    """使用 ONNX 后端进行合成。"""
-    from main_onnx import preload_all, synthesize_audio
+def dry_run():
+    """仅检查关键文件和依赖是否存在。"""
+    missing = []
+    if not os.path.isfile(TEST_JSON):
+        missing.append(TEST_JSON)
+    wav_dir = os.path.join(BASE_DIR, 'test', 'wav')
+    if not os.path.isdir(wav_dir):
+        missing.append(wav_dir)
 
-    print(f"--- ONNX 后端 (device={device}) ---")
-    preload_all(device=device)
+    if missing:
+        print("[DRY-RUN] 缺少文件/目录:")
+        for m in missing:
+            print(f"  {m}")
+        sys.exit(1)
 
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    wav_bytes = synthesize_audio(data, test=True, max_workers=4, device=device)
-    out_path = data.get('out_wav', 'test/test_hei_output.wav')
-    if os.path.isabs(out_path):
-        out_path = os.path.basename(out_path)
-    out_path = os.path.join(_project_root, out_path)
-
-    with open(out_path, 'wb') as f:
-        f.write(wav_bytes)
-    print(f"[OK] 合成完成: {out_path} ({len(wav_bytes)} bytes)")
+    print("[DRY-RUN] 测试环境就绪 ✓")
+    sys.exit(0)
 
 
-def run_pytorch(json_path: str, device: str):
-    """使用 PyTorch 后端进行合成。"""
-    from main_pytorch import preload_all, synthesize_audio
-
-    print(f"--- PyTorch 后端 (device={device}) ---")
-    preload_all(device=device)
-
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    wav_bytes = synthesize_audio(data, test=True, max_workers=4, device=device)
-    out_path = data.get('out_wav', 'test/test_hei_output.wav')
-    if os.path.isabs(out_path):
-        out_path = os.path.basename(out_path)
-    out_path = os.path.join(_project_root, out_path)
-
-    with open(out_path, 'wb') as f:
-        f.write(wav_bytes)
-    print(f"[OK] 合成完成: {out_path} ({len(wav_bytes)} bytes)")
+def send_request(url: str, data: dict) -> bytes:
+    """POST JSON 请求并返回响应体。"""
+    body = json.dumps(data).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        return resp.read()
 
 
-def print_param_summary(json_path: str):
-    """打印 JSON 中的参数使用情况。"""
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    print("\n========== 参数使用情况 ==========")
-
-    # 全局 Dynamic_parameter
-    dp = data.get('Dynamic_parameter', {})
-    print(f"\n[全局 Dynamic_parameter]")
-    for key, arr in dp.items():
-        vals = [v for v in set(arr) if abs(v) > 0.01] if isinstance(arr, list) else []
-        print(f"  {key}: {len(arr)} 帧{' (含非零值)' if vals else ''}")
-
-    # 每个音素的 Note_flags
-    print(f"\n[各音素 Note_flags]")
-    flag_keys = ['vel', 'vol', 'mod', 'shft', 'phtp', 'strt', 'splc', 'g', 'B', 'H', 'P']
-    for pid, info in data['phoneme_list'].items():
-        nf = info.get('Note_flags', {})
-        used = {k: nf.get(k) for k in flag_keys if k in nf and nf.get(k) != 0}
-        print(f"  音素 {pid} ({info['phoneme_name']}): {used}")
-
-    # 各音素的 phoneme_oto
-    print(f"\n[各音素 OTO 参数]")
-    for pid, info in data['phoneme_list'].items():
-        oto = info.get('phoneme_oto', {})
-        print(f"  音素 {pid} ({info['phoneme_name']}): "
-              f"Offset={oto.get('Offset')}ms, Consonant={oto.get('Consonant')}ms, "
-              f"Cutoff={oto.get('Cutoff')}ms, Preutter={oto.get('Preutter')}ms, "
-              f"Overlap={oto.get('Overlap')}ms")
-
-    print("\n================================")
+def validate_wav(wav_bytes: bytes) -> bool:
+    """简单验证 WAV 文件头是否合法。"""
+    if len(wav_bytes) < 44:
+        print(f"[FAIL] WAV 文件太小: {len(wav_bytes)} bytes (< 44)")
+        return False
+    if wav_bytes[:4] != b'RIFF':
+        print("[FAIL] 不是合法的 RIFF/WAV 文件")
+        return False
+    if wav_bytes[8:12] != b'WAVE':
+        print("[FAIL] 缺少 WAVE 标识")
+        return False
+    sample_rate = struct.unpack('<I', wav_bytes[24:28])[0]
+    print(f"[OK] 采样率: {sample_rate} Hz")
+    data_size = struct.unpack('<I', wav_bytes[40:44])[0]
+    duration = data_size / (sample_rate * 2)  # 16-bit mono
+    print(f"[OK] 音频时长: {duration:.2f} 秒")
+    return True
 
 
 def main():
-    parser = argparse.ArgumentParser(description='hei.wav 完整参数测试')
-    parser.add_argument('--json', default='test/test_hei.json',
-                        help='测试 JSON 路径')
-    parser.add_argument('--device', default='cpu',
-                        choices=['cpu', 'cuda', 'dml'],
-                        help='推理设备')
-    parser.add_argument('--pytorch', action='store_true',
-                        help='使用 PyTorch 后端 (默认 ONNX)')
-    parser.add_argument('--dry-run', action='store_true',
-                        help='仅验证 JSON 结构，不合成')
-    args = parser.parse_args()
+    # 服务地址
+    server_url = f'http://localhost:{SERVER_PORT}'
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--dry-run':
+            dry_run()
+        server_url = sys.argv[1]
 
-    json_path = os.path.join(_project_root, args.json)
-    if not os.path.exists(json_path):
-        print(f"[ERROR] JSON 文件不存在: {json_path}")
+    api_url = f'{server_url.rstrip("/")}/synthesize'
+
+    # 检查测试数据
+    if not os.path.isfile(TEST_JSON):
+        print(f"[FAIL] 找不到测试数据: {TEST_JSON}")
         sys.exit(1)
 
-    # 验证 JSON
-    data = validate_json(json_path)
-    print_param_summary(json_path)
+    with open(TEST_JSON, 'r', encoding='utf-8') as f:
+        test_data = json.load(f)
 
-    if args.dry_run:
-        print("\n[Dry-Run] JSON 验证通过，跳过合成")
-        return
+    # 修改输出路径为 test 目录
+    test_data['out_wav'] = OUTPUT_WAV
 
-    # 检查音频文件，缺失则自动生成
-    for pid, info in data['phoneme_list'].items():
-        wav_path = info['phoneme_oto']['audio_file_path']
-        abs_wav = os.path.join(_project_root, wav_path) if not os.path.isabs(wav_path) else wav_path
-        if not os.path.exists(abs_wav):
-            print(f"[INFO] 音频文件不存在，自动生成: {abs_wav}")
-            import soundfile as sf
-            import numpy as np
-            sr = 44100
-            dur = 0.8
-            t = np.linspace(0, dur, int(sr*dur), endpoint=False)
-            noise = np.random.randn(len(t)) * 0.1
-            noise[:int(0.1*sr)] *= 2.0
-            f0 = np.linspace(200, 300, len(t))
-            sine = 0.5*np.sin(2*np.pi*f0*t) + 0.25*np.sin(2*np.pi*f0*2*t) + 0.125*np.sin(2*np.pi*f0*3*t)
-            wav = sine + noise
-            wav[:int(0.005*sr)] *= np.linspace(0, 1, int(0.005*sr))
-            wav[-int(0.01*sr):] *= np.linspace(1, 0, int(0.01*sr))
-            sf.write(abs_wav, wav.astype(np.float32), sr)
-            print(f"[OK] 已生成: {abs_wav} ({dur*1000:.0f}ms)")
-
-    # 执行合成
+    # 推送合成请求
+    print(f"[INFO] 发送合成请求到 {api_url} ...")
     try:
-        if args.pytorch:
-            run_pytorch(json_path, args.device)
-        else:
-            run_onnx(json_path, args.device)
-    except Exception as e:
-        print(f"[ERROR] 合成失败: {e}")
-        import traceback
-        traceback.print_exc()
+        wav_bytes = send_request(api_url, test_data)
+    except urllib.error.URLError as e:
+        print(f"[FAIL] 请求失败: {e}")
+        print("请确保合成服务已启动，例如:")
+        print("  python http_syn2_cpu.py")
+        print("  python http_syn2_pytorch.py")
         sys.exit(1)
 
-    print("\n[Done] 测试完成")
+    print(f"[OK] 收到响应: {len(wav_bytes)} bytes")
+
+    # 保存 WAV
+    with open(OUTPUT_WAV, 'wb') as f:
+        f.write(wav_bytes)
+    print(f"[OK] WAV 已保存: {OUTPUT_WAV}")
+
+    # 验证 WAV
+    if not validate_wav(wav_bytes):
+        sys.exit(1)
+
+    print("[PASS] 合成测试通过 ✓")
 
 
 if __name__ == '__main__':
