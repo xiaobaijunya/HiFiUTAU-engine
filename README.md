@@ -1,39 +1,65 @@
-# HiFiUTAU-Engine OpenUTAU
+# HiFiUTAU-Engine
 
-基于 PC-NSF-HiFiGAN 神经声码器的高质量歌声合成后端，搭配 [OpenUtau-CustomRenderer分支](https://github.com/xiaobaijunya/OpenUtau-CustomRenderer) 提供的 **CUSTOM_SERVER** 合成引擎使用。
+<p align="center">
+  基于 PC-NSF-HiFiGAN 神经声码器的高质量歌声合成
+</p>
+
+<p align="center">
+  搭配 <a href="https://github.com/xiaobaijunya/OpenUtau-CustomRenderer">OpenUtau-CustomRenderer</a> 的 <b>CUSTOM_SERVER</b> 合成引擎使用
+</p>
+
+---
 
 ## 简介
 
 HiFiUTAU-Engine 是一个独立运行的 HTTP 语音合成服务，接收 OpenUTAU 发送的 JSON 合成请求，实时合成并返回 WAV 音频。支持 ONNX Runtime 和 PyTorch 两种推理后端，并提供了丰富的参数控制能力，可实现气声、张力、咆哮等多种表现力调节。
 
+---
 
-## 模型下载
+## ⬇ 直接下载（推荐）
 
-> 请先下载对应模型文件，放置到程序根目录。
+<p align="center">
+  <a href="https://github.com/xiaobaijunya/HiFiUTAU-engine/releases">
+    <img src="https://img.shields.io/badge/Download%20%E6%89%93%E5%8C%85%E7%A8%8B%E5%BA%8F-%F0%9F%9A%80%20Releases-blue?style=for-the-badge&logo=github" alt="Download">
+  </a>
+</p>
 
-### ONNX 模式所需模型
+自行配置 Python 环境涉及安装 Conda、PyTorch / ONNX Runtime 等多步操作，容易因版本不匹配或系统差异出错。**建议直接下载打包好的程序**：
 
-[下载 ONNX 模型包](https://github.com/xiaobaijunya/HiFiUTAU-engine/releases/download/0.0.0/hifiserver_onnx.zip)（含 HiFiGAN 和 HN-SEP 模型）
+- 前往 [Releases 页面](https://github.com/xiaobaijunya/HiFiUTAU-engine/releases) 选择对应平台的压缩包（Windows / Linux / macOS）
+- 无需安装 Python、无需配置环境、无需安装依赖
+- 下载解压即可运行
 
-### PyTorch 模式所需模型
+---
 
-[下载 PyTorch 模型包](https://github.com/xiaobaijunya/HiFiUTAU-engine/releases/download/0.0.1/pytorch_model.zip)（含 HiFiGAN 和 HN-SEP 模型）
+## 从源码运行
 
-## 环境配置（Conda）
+> 如非必要，建议优先使用上方直接下载的打包程序。
+> 注意：内容为ai生成+人工检查，可能会有信息错误。
+
+### 模型下载
+
+> 无论使用哪种启动方式，都需要先下载对应模型文件，放置到程序根目录。
+
+| 模式 | 模型包 | 内容 |
+|------|--------|------|
+| ONNX | [下载 ONNX 模型包](https://github.com/xiaobaijunya/HiFiUTAU-engine/releases/download/0.0.0/hifiserver_onnx.zip) | HiFiGAN + HN-SEP 模型 |
+| PyTorch | [下载 PyTorch 模型包](https://github.com/xiaobaijunya/HiFiUTAU-engine/releases/download/0.0.1/pytorch_model.zip) | HiFiGAN + HN-SEP 模型 |
+
+### 环境配置
 
 > 如果尚未安装 Conda，请先从 [Miniconda 官网](https://www.anaconda.com/download) 下载并安装。
 
-### 1. 创建 Conda 环境
+**1. 创建 Conda 环境**
 
 ```bash
-# 创建 Python 3.12 环境
 conda create -n hifiutau-engine python=3.12
 conda activate hifiutau-engine
 ```
 
-### 2. 安装依赖
+**2. 安装依赖**
 
-#### ONNX 模式（CPU / DirectML）
+- **ONNX 模式（CPU / DirectML）**
 
 ```bash
 # 安装 ONNX Runtime CPU 版（全平台通用）
@@ -46,9 +72,9 @@ pip install onnxruntime-directml
 pip install -r requirements.txt
 ```
 
-#### PyTorch 模式（CPU / CUDA）
+- **PyTorch 模式（CPU / CUDA）**
 
-> 请前往 [PyTorch 官网](https://pytorch.org/get-started/locally/) 选择你的操作系统和 CUDA 版本，获取对应的安装命令。
+  > 请前往 [PyTorch 官网](https://pytorch.org/get-started/locally/) 选择你的操作系统和 CUDA 版本，获取对应的安装命令。
 
 ```bash
 # CPU 版
@@ -61,51 +87,48 @@ pip install torch --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements_pytorch.txt
 ```
 
-### 3. 配置运行参数
+**3. 配置运行参数**
 
 编辑 `run_config.txt`：
 
 ```ini
-# 仅对onnx模式生效
+# 仅对win系统的onnx模式生效
 # device: cpu 或 dml（ONNX 模式）
 device=cpu
 # DML 工作进程数量（仅在 device=dml 时有效）
 dml_workers=2
 ```
 
-## 使用方式
+### 启动服务器
 
-### 1. 启动合成服务器
+- **ONNX 模式（推荐，兼容性最好）**
 
-#### ONNX 模式（推荐，兼容性最好）
+  ```bash
+  python http_syn2_cpu.py
+  ```
 
-```bash
-# CPU 模式 & DirectML 模式（Windows GPU）
-python http_syn2_cpu.py
-```
+- **PyTorch 模式（需要 GPU，性能更优）**
 
-#### PyTorch 模式（需要 GPU，性能更优）
+  ```bash
+  python http_syn2_pytorch.py
+  ```
 
-```bash
-python http_syn2_pytorch.py
-```
-
-启动后服务器默认监听 `http://localhost:8000`，API 端点：
+启动后服务器默认监听 `http://localhost:8000`。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/synthesize` | 接收 JSON 数据，返回 WAV 音频 |
 
-### 2. 在 OpenUTAU 中使用
+### 在 OpenUTAU 中使用
 
-1. **下载专用 OpenUTAU**：[xiaobaijunya/OpenUtau-CustomRenderer](https://github.com/xiaobaijunya/OpenUtau-CustomRenderer)
-2. **加载 UTAU 音源**
-3. **选择合成引擎**：在音轨设置中选择 `CUSTOM_SERVER`
-4. **等待合成**
+1. 下载专用 OpenUTAU：[xiaobaijunya/OpenUtau-CustomRenderer](https://github.com/xiaobaijunya/OpenUtau-CustomRenderer)
+2. 加载 UTAU 音源
+3. 在音轨上选择合成引擎为 `CUSTOM_SERVER`
+4. 等待合成
 
-> 提示：可以在 OpenUTAU 中调整预渲染的线程数。CPU 渲染建议 2 线程，GPU 渲染可根据显卡性能调高。
-> 如果不希望修改参数时反复提交渲染，可以关闭预渲染，使用实时渲染模式。
+> 可以在 OpenUTAU 中调整预渲染线程数。CPU 渲染建议 2 线程，GPU 渲染可根据显卡性能调高。如不希望修改参数时反复提交渲染，可关闭预渲染，使用实时渲染模式。
 
+---
 
 ## 支持的参数
 
@@ -138,55 +161,24 @@ python http_syn2_pytorch.py
 
 ```
 ├── http_syn2.py                 # ONNX HTTP 服务入口（单进程）
-├── http_syn2_cpu.py             # ONNX HTTP 服务（支持 CPU / DML Worker Pool）
+├── http_syn2_cpu.py             # ONNX HTTP 服务（CPU / DML Worker Pool）
 ├── http_syn2_pytorch.py         # PyTorch HTTP 服务入口
 ├── main_onnx.py                 # ONNX 合成入口 & 模型加载
 ├── main_pytorch.py              # PyTorch 合成入口 & 模型加载
-├── run_config.txt               # 运行配置（device / dml_workers）
+├── run_config.txt               # 运行配置
 ├── requirements.txt             # ONNX 模式依赖
 ├── requirements_pytorch.txt     # PyTorch 模式依赖
 │
 ├── build/                       # PyInstaller 打包配置
-│   ├── hifiserver_cpu.spec      #   CPU 版
-│   ├── hifiserver_dml.spec      #   DML 版
-│   ├── hifiserver_linux.spec    #   Linux 版
-│   ├── hifiserver_macos.spec    #   macOS 版
-│   ├── hifiserver_pytorch.spec  #   PyTorch 版 (Windows)
-│   ├── hifiserver_pytorch_linux.spec
-│   ├── hifiserver_pytorch_macos.spec
-│   └── runtime_hook.py          #   运行时钩子
-│
 ├── synthesis_pipeline/          # 合成管线（核心处理逻辑）
-│   ├── engine.py                # 合成引擎（调度管线）
-│   ├── fragment.py              # 音素片段处理（音频切割、mel 转换、时间拉伸）
-│   ├── growl.py                 # 咆哮效果（时域延迟调制）
-│   ├── tension_filter.py        # 动态张力滤波器（STFT 域频谱倾斜）
-│   ├── post_process.py          # HN-SEP 后处理（breath/tension/voicing）
-│   └── utils.py                 # 工具函数
-│
 ├── tools/                       # 工具模块
-│   ├── base_splicer.py          # 隐空间拼接基类
-│   ├── base_hnsep.py            # HN-SEP 基类
-│   ├── hidden_splicer.py        # ONNX HiddenSplicer（隐空间拼接）
-│   ├── pytorch_splicer.py       # PyTorch HiddenSplicer
-│   ├── hnsep_onnx.py            # HN-SEP ONNX 推理
-│   ├── hnsep_pytorch.py         # HN-SEP PyTorch 推理
-│   ├── nsf_hifigan.py           # HiFiGAN 模型定义（SplitGenerator）
-│   ├── utils.py                 # 工具函数（AttrDict, init_weights）
-│
 ├── hnsep_onnx/                  # HN-SEP ONNX 模型
 ├── hnsep/                       # HN-SEP PyTorch 模型
 ├── exported_onnx_v2/            # 导出的 ONNX 拆分模型
 └── pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/  # HiFiGAN 模型 & 配置
 ```
 
-## 技术说明
-
-- **采样率**: 44100Hz
-- **FFT 参数**: n_fft=2048, hop_size=512, win_size=2048
-- **Mel 谱**: 128 频段, freq range 40~16000Hz
-- **声码器**: PC-NSF-HiFiGAN（带基频条件的神经声码器）
-- **谐波/噪声分离**: HN-SEP 模型用于独立控制气声、发声等参数
+---
 
 ## 构建（GitHub Actions）
 
@@ -198,9 +190,18 @@ python http_syn2_pytorch.py
 | Linux x64 | `hifiserver-pytorch-linux-x64.zip` |
 | macOS ARM64 | `hifiserver-pytorch-osx-arm64.zip` |
 
+---
+
 ## 相关链接
 
 - **专用 OpenUTAU（CustomRenderer 分支）**: [xiaobaijunya/OpenUtau-CustomRenderer](https://github.com/xiaobaijunya/OpenUtau-CustomRenderer)
-- **声码器模型**: PC-NSF-HiFiGAN ([pc_nsf_hifigan_44.1k_hop512_128bin_2025.02](https://github.com/openvpi/SoundCodec))
+- **声码器模型**: PC-NSF-HiFiGAN（[pc_nsf_hifigan_44.1k_hop512_128bin_2025.02](https://github.com/openvpi/SoundCodec)）
 - **HN-SEP**: [vocal-remover](https://github.com/yxlllc/vocal-remover/releases)
+- **UTAU 重采样器**: [hifisampler](https://github.com/openhachimi/hifisampler)（基于 PC-NSF-HiFiGAN 的 UTAU 重采样器）
+
+---
+
+## 特别感谢
+
+- [**依旧在星空下等你**](https://github.com/yjzxkxdn)
 
