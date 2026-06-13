@@ -20,6 +20,7 @@ import logging
 import threading
 import multiprocessing
 import multiprocessing.connection
+import waitress
 from main_onnx import synthesize_audio, preload_all
 
 # 屏蔽 Werkzeug 开发服务器警告
@@ -237,8 +238,8 @@ def receive_json():
     try:
         data = request.get_json()
 
-        with open('test.json', 'w', encoding='utf-8') as f:
-            f.write(json.dumps(data, indent=2, ensure_ascii=False))
+        # with open('test.json', 'w', encoding='utf-8') as f:
+        #     f.write(json.dumps(data, indent=2, ensure_ascii=False))
 
         if _device == 'dml':
             # DML 模式：通过 Worker Pool 派发
@@ -291,11 +292,11 @@ if __name__ == '__main__':
 
         try:
             print(f"Server starting on http://localhost:{SERVER_PORT} (DML, "
-                  f"{num_workers} workers)")
+                  f"{num_workers} workers, waitress)")
             print("API endpoints:")
             print("  POST /synthesize - 接收JSON数据并返回二进制wav音频")
-            app.run(host='localhost', port=SERVER_PORT, debug=False,
-                    threaded=True)
+            waitress.serve(app, host='localhost', port=SERVER_PORT,
+                           threads=8)
         finally:
             _pool.shutdown()
 
@@ -311,8 +312,8 @@ if __name__ == '__main__':
             print(f"[WARN] 模型预加载失败（不影响运行，但首次合成会慢）: {e}")
         print("预加载完成")
 
-        print(f"Server starting on http://localhost:{SERVER_PORT} (CPU)")
+        print(f"Server starting on http://localhost:{SERVER_PORT} (CPU, waitress)")
         print("API endpoints:")
         print("  POST /synthesize - 接收JSON数据并返回二进制wav音频")
-        app.run(host='localhost', port=SERVER_PORT, debug=False,
-                threaded=True)
+        waitress.serve(app, host='localhost', port=SERVER_PORT,
+                       threads=8)

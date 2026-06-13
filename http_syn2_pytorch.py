@@ -8,10 +8,8 @@ hifiutau-engine HTTP 服务 — PyTorch 推理版
 from flask import Flask, request, Response
 import json
 import logging
+import waitress
 from main_pytorch import synthesize_audio, preload_all
-
-# 屏蔽 Werkzeug 开发服务器警告
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 DEVICE = 'cuda'
 app = Flask(__name__)
@@ -69,7 +67,7 @@ if __name__ == '__main__':
         print(f"[WARN] 模型预加载失败（不影响运行，但首次合成会慢）: {e}")
     print("预加载完成")
 
-    print(f"Server starting on http://localhost:8000 (PyTorch, device={DEVICE})")
+    print(f"Server starting on http://localhost:8000 (PyTorch, device={DEVICE}, waitress)")
     print("API endpoints:")
     print("  POST /synthesize - 接收JSON数据并返回二进制wav音频（隐空间混合拼接）")
-    app.run(host='localhost', port=8000, debug=False)
+    waitress.serve(app, host='localhost', port=8000, threads=8)

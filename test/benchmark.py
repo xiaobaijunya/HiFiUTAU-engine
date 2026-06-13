@@ -23,8 +23,12 @@ RUNS = 5
 COMPILE = 0
 
 
-def run_synthesis(url: str, data: dict) -> float:
-    """执行一次合成，返回耗时（秒）。"""
+def run_synthesis(url: str, data: dict) -> tuple[float, int, float]:
+    """执行一次合成，返回 (总耗时, WAV大小, 服务端处理耗时)。
+
+    总耗时: 从发送请求到收到全部响应。
+    服务端处理耗时: 从发送请求到收到第一个字节（≈ 服务端处理时间 + 网络延迟）。
+    """
     body = json.dumps(data).encode('utf-8')
     req = urllib.request.Request(
         url,
@@ -34,14 +38,18 @@ def run_synthesis(url: str, data: dict) -> float:
     )
     start = time.perf_counter()
     with urllib.request.urlopen(req, timeout=300) as resp:
-        wav_bytes = resp.read()
-    elapsed = time.perf_counter() - start
+        # 收到第一个字节 = 服务端完成处理开始回传数据
+        chunk = resp.read(8192)
+        t_server = time.perf_counter() - start
+        # 读取剩余数据
+        wav_bytes = chunk + resp.read()
+    t_total = time.perf_counter() - start
 
     # 保存 WAV
     with open(OUTPUT_WAV, 'wb') as f:
         f.write(wav_bytes)
 
-    return elapsed, len(wav_bytes)
+    return t_total, len(wav_bytes), t_server
 
 
 def main():
@@ -74,22 +82,26 @@ def main():
 
     times = []
     sizes = []
+    server_times = []
     for i in range(RUNS):
-        elapsed, size = run_synthesis(api_url, test_data)
+        elapsed, size, t_server = run_synthesis(api_url, test_data)
         times.append(elapsed)
         sizes.append(size)
-        print(f"  第 {i+1:2d} 次: {elapsed:.3f} 秒  |  {size/1024:.1f} KB")
+        server_times.append(t_server)
+        print(f"  第 {i+1:2d} 次: {elapsed:.3f} 秒  |  服务端: {t_server:.3f} 秒"
+              f"  |  {size/1024:.1f} KB")
 
     # 统计
     avg = sum(times) / len(times)
     best = min(times)
     worst = max(times)
+    avg_server = sum(server_times) / len(server_times)
     total_data = sum(sizes) / 1024 / 1024
 
     print(f"{'-'*60}")
-    print(f"  平均: {avg:.3f} 秒")
-    print(f"  最快: {best:.3f} 秒")
-    print(f"  最慢: {worst:.3f} 秒")
+    print(f"  总耗时平均: {avg:.3f} 秒  |  最快: {best:.3f}  |  最慢: {worst:.3f}")
+    print(f"  服务端处理平均: {avg_server:.3f} 秒")
+    print(f"  数据传输平均: {avg - avg_server:.3f} 秒")
     print(f"  总数据: {total_data:.1f} MB")
     print(f"{'='*60}")
 

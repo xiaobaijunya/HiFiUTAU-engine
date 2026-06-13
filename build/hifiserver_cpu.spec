@@ -22,6 +22,7 @@ a = Analysis(
         'tools',
         'tools.hidden_splicer',
         'tools.hnsep_onnx',
+        'waitress',
     ],
     hookspath=[],
     hooksconfig={},

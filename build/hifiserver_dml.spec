@@ -25,6 +25,7 @@ a = Analysis(
         'tools.hnsep_onnx',
         # DirectML provider
         'onnxruntime',
+        'waitress',
     ],
     hookspath=[],
     hooksconfig={},

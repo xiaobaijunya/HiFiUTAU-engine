@@ -49,6 +49,7 @@ a = Analysis(
         'hnsep',
         'hnsep.nets',
         'hnsep.layers',
+        'waitress',
     ],
     hookspath=[],
     hooksconfig={},
