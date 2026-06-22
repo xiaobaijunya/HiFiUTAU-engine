@@ -272,7 +272,6 @@ class Generator(torch.nn.Module):
         return x
 
     def remove_weight_norm(self):
-        print('Removing weight norm...')
         for l in self.ups:
             remove_parametrizations(l, "weight")
         for l in self.resblocks:
@@ -402,7 +401,6 @@ class SplitGenerator(torch.nn.Module):
         return x
     
     def remove_weight_norm(self):
-        print('Removing weight norm...')
         for l in self.ups:
             remove_parametrizations(l, "weight")
         for l in self.resblocks:
