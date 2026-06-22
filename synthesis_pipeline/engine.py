@@ -11,6 +11,8 @@ from synthesis_pipeline.fragment_mel import FragmentMel
 from synthesis_pipeline.post_process import apply_hnsep_postprocess
 from synthesis_pipeline.growl import apply_growl
 from synthesis_pipeline.tension_filter import apply_dynamic_lowcut
+from synthesis_pipeline.warmth import apply_warmth_eq, apply_harmonic_compression
+from synthesis_pipeline.post_process import _hnsep_separate
 from synthesis_pipeline.utils import resample_array, interp_to_len
 
 
@@ -49,16 +51,6 @@ class SynthesisEngine:
     def synthesize(self, json_data: dict, *,
                    test: bool = False,
                    max_workers: int = 2) -> bytes:
-        """执行完整合成管线。
-
-        Args:
-            json_data:   OpenUTAU JSON 数据
-            test:        是否同时写出测试 WAV 文件
-            max_workers: cut_audio 并行线程数
-
-        Returns:
-            WAV 格式的音频 bytes
-        """
         t_start = time.time()
 
         # 检查是否有 SPLC=1 音素，决定使用哪种管线
@@ -81,7 +73,8 @@ class SynthesisEngine:
               f"breath={len(frag.breath)}帧, "
               f"voicing={len(frag.voicing)}帧, "
               f"growl={len(frag.growl)}帧, "
-              f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧")
+              f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧, "
+              f"warm={len(frag.warm)}帧, hcmp={len(frag.hcmp)}帧")
 
         frag.cut_audio(max_workers=max_workers)
         frag.adjust_volume_by_phtp()
@@ -116,7 +109,8 @@ class SynthesisEngine:
               f"breath={len(frag.breath)}帧, "
               f"voicing={len(frag.voicing)}帧, "
               f"growl={len(frag.growl)}帧, "
-              f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧")
+              f"brel={len(frag.brel)}帧, breh={len(frag.breh)}帧, "
+              f"warm={len(frag.warm)}帧, hcmp={len(frag.hcmp)}帧")
         print("拼接模式: mel 域能量叠加 (SPLC=1)")
 
         frag.cut_audio(max_workers=max_workers)
@@ -143,8 +137,7 @@ class SynthesisEngine:
     def _postprocess(self, wav, frag, t_start, test):
         """HN-SEP 后处理 + WAV 输出（两管线共用）。"""
 
-        # ── 6. HN-SEP 后处理 ──
-        # 波形已包含首尾补帧，动态参数需同步补齐再传入
+        # ── 计算补帧 ──
         front_dh = round(self._splicer.front_pad_frames * self._splicer.model_hop / frag.Dynamic_hop)
         tail_dh  = round(self._splicer.tail_pad_frames * self._splicer.model_hop / frag.Dynamic_hop)
 
@@ -155,17 +148,67 @@ class SynthesisEngine:
             tp = np.full(t, arr[-1], dtype=arr.dtype) if t > 0 else np.array([], dtype=arr.dtype)
             return np.concatenate([fp, arr, tp])
 
-        if self._hnsep is not None:
-            wav = apply_hnsep_postprocess(
-                wav,
-                _pad(frag.breath, front_dh, tail_dh),
-                _pad(frag.tension, front_dh, tail_dh),
-                _pad(frag.voicing, front_dh, tail_dh),
-                frag.sample_rate, self._hnsep,
-                f0_curve=_pad(frag.pit, front_dh, tail_dh),
-                brel_array=_pad(frag.brel, front_dh, tail_dh),
-                breh_array=_pad(frag.breh, front_dh, tail_dh),
-            )
+        # ── 6. HN-SEP 统一管线（一次分离，多次处理） ──
+        # 收集所有依赖 HN-SEP 的参数
+        _need_hnsep_breath = len(frag.breath) > 0 and not np.allclose(frag.breath, 0, atol=0.5)
+        _need_hnsep_tension = len(frag.tension) > 0 and not np.allclose(frag.tension, 0, atol=0.5)
+        _need_hnsep_voicing = len(frag.voicing) > 0 and not np.allclose(frag.voicing, 100, rtol=0.05)
+        _need_hnsep_brel = len(frag.brel) > 0 and not np.allclose(frag.brel, 0, atol=0.5)
+        _need_hnsep_breh = len(frag.breh) > 0 and not np.allclose(frag.breh, 0, atol=0.5)
+        _need_hnsep_hcmp = len(frag.hcmp) > 0 and not np.allclose(frag.hcmp, 0, atol=0.5)
+        _need_hnsep_warm = len(frag.warm) > 0 and not np.allclose(frag.warm, 0, atol=0.5)
+
+        _any_hnsep = (_need_hnsep_breath or _need_hnsep_tension or _need_hnsep_voicing
+                      or _need_hnsep_brel or _need_hnsep_breh
+                      or _need_hnsep_hcmp or _need_hnsep_warm)
+
+        if _any_hnsep:
+            if self._hnsep is None:
+                raise RuntimeError(
+                    "当前合成使用了依赖 HN-SEP 的参数 (breath/tension/voicing/brel/breh/warm/hcmp)，"
+                    "但 HN-SEP 模型未加载。请确保 hnsep 模型路径正确。"
+                )
+
+            print("HN-SEP 管线: 一次分离谐波/噪声...")
+            harmonic, noise = _hnsep_separate(wav, self._hnsep)
+            n_samples = len(wav)
+
+            # ── 6a. breath/tension/voicing/brel/breh（原 HN-SEP 后处理） ──
+            if _need_hnsep_breath or _need_hnsep_tension or _need_hnsep_voicing \
+                    or _need_hnsep_brel or _need_hnsep_breh:
+                _pad_b = _pad(frag.breath, front_dh, tail_dh)
+                _pad_t = _pad(frag.tension, front_dh, tail_dh)
+                _pad_v = _pad(frag.voicing, front_dh, tail_dh)
+                _pad_f0 = _pad(frag.pit, front_dh, tail_dh)
+                _pad_brel = _pad(frag.brel, front_dh, tail_dh)
+                _pad_breh = _pad(frag.breh, front_dh, tail_dh)
+
+                wav = apply_hnsep_postprocess(
+                    wav, _pad_b, _pad_t, _pad_v, frag.sample_rate, self._hnsep,
+                    f0_curve=_pad_f0, brel_array=_pad_brel, breh_array=_pad_breh,
+                )
+                # 重新分离（因为 apply_hnsep_postprocess 内部已重新混合）
+                harmonic, noise = _hnsep_separate(wav, self._hnsep)
+
+            # ── 6b. 谐波压缩（hcmp）— 仅作用于谐波 ──
+            if _need_hnsep_hcmp:
+                hcmp_val = float(np.mean(frag.hcmp))
+                print(f"  谐波压缩: hcmp={hcmp_val:.1f}")
+                harmonic = apply_harmonic_compression(
+                    harmonic, hcmp_val, frag.sample_rate, hnsep_session=None
+                )
+
+            # ── 6c. 温暖度 EQ — 仅作用于谐波 ──
+            if _need_hnsep_warm:
+                warm_val = float(np.mean(frag.warm))
+                print(f"  温暖度 EQ: warmth={warm_val:.1f}")
+                harmonic = apply_warmth_eq(
+                    harmonic, warm_val, frag.sample_rate, hnsep_session=None
+                )
+
+            # ── 6d. 混合 ──
+            wav = harmonic + noise
+            print("  HN-SEP 管线处理完成")
 
         # ── 7. 低切（F0 跟随 Butterworth 高通） ──
         if len(frag.lowcut) > 0 and not np.allclose(frag.lowcut, 0, atol=0.5):
@@ -186,7 +229,7 @@ class SynthesisEngine:
                               f0=_pad(frag.pit, front_dh, tail_dh),
                               f0_hop=frag.Dynamic_hop)
 
-        # ── 9. 统一裁剪首尾补帧 ──
+        # ── 11. 统一裁剪首尾补帧 ──
         # HiFi-GAN 和 HN-SEP 都已受益于上下文，现在裁掉
         front_trim = self._splicer.front_pad_frames * self._splicer.model_hop
         tail_trim = self._splicer.tail_pad_frames * self._splicer.model_hop
@@ -195,7 +238,7 @@ class SynthesisEngine:
         if tail_trim > 0 and len(wav) > tail_trim:
             wav = wav[:-tail_trim]
 
-        # ── 9. 输出前：按首音素 p0→p1 / 尾音素 p3→p4 包络淡入淡出 ──
+        # ── 12. 输出前：按首音素 p0→p1 / 尾音素 p3→p4 包络淡入淡出 ──
         first_env = frag.phoneme_list[0]['envelope']
         last_env = frag.phoneme_list[-1]['envelope']
         sr = frag.sample_rate
@@ -218,7 +261,7 @@ class SynthesisEngine:
             gain_out = np.linspace(p3y / 100.0, p4y / 100.0, fade_out_len)
             wav[-fade_out_len:] *= gain_out
 
-        # ── 10. 输出 ──
+        # ── 13. 输出 ──
         if test:
             sf.write('./test_hidden_splice.wav', wav, 44100, 'PCM_16')
             print(f'保存: ./test_hidden_splice.wav ({len(wav)} 采样)')

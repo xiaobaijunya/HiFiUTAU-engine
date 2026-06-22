@@ -30,6 +30,8 @@ class Fragment:
         self.lowcut = self._get_param(dp, ('lowcut', 'lowc'))
         self.brel = self._get_param(dp, ('brel', 'bret_low'))
         self.breh = self._get_param(dp, ('breh', 'bret_high'))
+        self.warm = self._get_param(dp, ('warm', 'warmth'))
+        self.hcmp = self._get_param(dp, ('hcmp',))
 
     # ─── 静态工具 ───
     @staticmethod

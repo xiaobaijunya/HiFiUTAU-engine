@@ -32,6 +32,8 @@ class FragmentMel:
         self.lowcut = self._get_param(dp, ('lowcut', 'lowc'))
         self.brel = self._get_param(dp, ('brel', 'bret_low'))
         self.breh = self._get_param(dp, ('breh', 'bret_high'))
+        self.warm = self._get_param(dp, ('warm', 'warmth'))
+        self.hcmp = self._get_param(dp, ('hcmp',))
 
         self.mel_exc = mel_exc
 
@@ -94,7 +96,7 @@ class FragmentMel:
         mel = dynamic_range_compression(mel)
 
         # strt=1: 抹平循环段音量起伏
-        if strt == 1:
+        if strt == 1 and con_frames < mel.shape[1]:
             vowel = mel[:, :-con_frames]
             frame_energy = np.mean(np.exp(vowel), axis=0)
             frame_energy = np.maximum(frame_energy, 1e-12)
