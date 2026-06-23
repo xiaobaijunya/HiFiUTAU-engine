@@ -52,9 +52,11 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # ── 1. 检出代码 ──
+      # ── 1. 检出代码（完整历史，用于生成更新日志）──
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # ── 2. 设置 Python ──
       - name: Setup Python 3.12
@@ -185,6 +187,59 @@ jobs:
           cd dist/${{ matrix.arch.output }}
           zip -r ../../hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.zip .
 
+      # ── 10b. 生成 Release body（含更新日志）──
+      - name: Generate release body
+        if: ${{ inputs.release }}
+        shell: bash
+        run: |
+          REPO="xiaobaijunya/HiFiUTAU-engine"
+
+          # 基础发布说明
+          cat > release_body.md <<- BODYEOF
+          ## hifiserver ${{ inputs.version }}
+
+          | 平台 | 文件 | 说明 |
+          |------|------|------|
+          | 🪟 Windows | \`hifiserver-win-x64-${{ inputs.version }}.zip\` | DML 推理 (DirectML) |
+          | 🐧 Linux | \`hifiserver-linux-x64-${{ inputs.version }}.zip\` | CPU 推理 |
+          | 🍎 macOS | \`hifiserver-osx-arm64-${{ inputs.version }}.zip\` | CPU 推理 (Apple Silicon) |
+
+          > 解压后直接运行对应平台的可执行文件即可启动 HTTP 服务。
+          >
+          > **注意**: 只有【zhCVVC和zh某不能说音素器】支持自适应音量 PHTP 的自动设置。
+          > 支持参数: GWL, TENC, BREC, VOIC, VEL, VOL, PHTP, GENC
+
+          BODYEOF
+
+          # ---- 生成更新日志 ----
+          echo "" >> release_body.md
+          echo "---" >> release_body.md
+          echo "" >> release_body.md
+          echo "## 更新内容" >> release_body.md
+          echo "" >> release_body.md
+
+          # 获取上一个 tag（当前 tag 尚未创建）
+          PREV_TAG=$(git tag --sort=-version:refname | head -n 1)
+
+          if [ -z "$PREV_TAG" ]; then
+            # 无上一个 tag：列出所有历史提交
+            git log --oneline --no-merges --format="%H %s" | awk -v repo="$REPO" '{
+              hash=$1; $1=""; sub(/^ /,"")
+              printf "%d. [%s](https://github.com/%s/commit/%s)\n", NR, $0, repo, hash
+            }' >> release_body.md
+          else
+            echo "基于上个版本 \`$PREV_TAG\` 的更新：" >> release_body.md
+            echo "" >> release_body.md
+            git log "$PREV_TAG"..HEAD --oneline --no-merges --format="%H %s" | awk -v repo="$REPO" '{
+              hash=$1; $1=""; sub(/^ /,"")
+              printf "%d. [%s](https://github.com/%s/commit/%s)\n", NR, $0, repo, hash
+            }' >> release_body.md
+          fi
+
+          echo "=== release_body.md ==="
+          cat release_body.md
+
+      # ── 11. Release ──
       - name: Release
         uses: softprops/action-gh-release@v2
         if: ${{ inputs.release }}
@@ -197,16 +252,4 @@ jobs:
           draft: ${{ inputs.draft }}
           files: |
             hifiserver-${{ matrix.arch.name }}-${{ inputs.version }}.*
-          body: |
-            ## hifiserver ${{ inputs.version }}
-
-            | 平台 | 文件 | 说明 |
-            |------|------|------|
-            | 🪟 Windows | `hifiserver-win-x64-${{ inputs.version }}.zip` | DML 推理 (DirectML) |
-            | 🐧 Linux | `hifiserver-linux-x64-${{ inputs.version }}.zip` | CPU 推理 |
-            | 🍎 macOS | `hifiserver-osx-arm64-${{ inputs.version }}.zip` | CPU 推理 (Apple Silicon) |
-
-            > 解压后直接运行对应平台的可执行文件即可启动 HTTP 服务。
-            >
-            > **注意**: 只有【zhCVVC和zh某不能说音素器】支持自适应音量 PHTP 的自动设置。
-            > 支持参数: GWL, TENC, BREC, VOIC, VEL, VOL, PHTP, GENC
+          body_path: release_body.md
