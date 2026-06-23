@@ -53,8 +53,9 @@ class SynthesisEngine:
         t_start = time.time()
 
         # 检查是否有 SPLC=1 音素，决定使用哪种管线
+        # 默认 SPLC=1（未设置时按 mel 域能量叠加拼接处理）
         use_mel_pipeline = any(
-            info.get('Note_flags', {}).get('splc', 0) == 1
+            info.get('Note_flags', {}).get('splc', 1) == 1
             for info in json_data['phoneme_list'].values()
         )
 
