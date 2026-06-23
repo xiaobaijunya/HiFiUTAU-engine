@@ -8,12 +8,11 @@ import soundfile as sf
 
 from synthesis_pipeline.fragment import Fragment
 from synthesis_pipeline.fragment_mel import FragmentMel
-from synthesis_pipeline.post_process import apply_hnsep_postprocess
+from synthesis_pipeline.post_process import apply_hnsep_postprocess, apply_hnsep_postprocess_components
 from synthesis_pipeline.growl import apply_growl
 from synthesis_pipeline.tension_filter import apply_dynamic_lowcut
 from synthesis_pipeline.warmth import apply_warmth_eq, apply_harmonic_compression
-from synthesis_pipeline.post_process import _hnsep_separate
-from synthesis_pipeline.utils import resample_array, interp_to_len
+from synthesis_pipeline.utils import resample_array, interp_to_len, hnsep_separate
 
 
 class SynthesisEngine:
@@ -148,7 +147,7 @@ class SynthesisEngine:
             tp = np.full(t, arr[-1], dtype=arr.dtype) if t > 0 else np.array([], dtype=arr.dtype)
             return np.concatenate([fp, arr, tp])
 
-        # ── 6. HN-SEP 统一管线（一次分离，多次处理） ──
+        # ── 6. HN-SEP 统一管线（真正的一次分离，多次处理） ──
         # 收集所有依赖 HN-SEP 的参数
         _need_hnsep_breath = len(frag.breath) > 0 and not np.allclose(frag.breath, 0, atol=0.5)
         _need_hnsep_tension = len(frag.tension) > 0 and not np.allclose(frag.tension, 0, atol=0.5)
@@ -158,11 +157,10 @@ class SynthesisEngine:
         _need_hnsep_hcmp = len(frag.hcmp) > 0 and not np.allclose(frag.hcmp, 0, atol=0.5)
         _need_hnsep_warm = len(frag.warm) > 0 and not np.allclose(frag.warm, 0, atol=0.5)
 
-        _any_hnsep = (_need_hnsep_breath or _need_hnsep_tension or _need_hnsep_voicing
-                      or _need_hnsep_brel or _need_hnsep_breh
-                      or _need_hnsep_hcmp or _need_hnsep_warm)
+        _need_hnsep_legacy = (_need_hnsep_breath or _need_hnsep_tension or _need_hnsep_voicing
+                              or _need_hnsep_brel or _need_hnsep_breh)
 
-        if _any_hnsep:
+        if _need_hnsep_legacy or _need_hnsep_hcmp or _need_hnsep_warm:
             if self._hnsep is None:
                 raise RuntimeError(
                     "当前合成使用了依赖 HN-SEP 的参数 (breath/tension/voicing/brel/breh/warm/hcmp)，"
@@ -170,12 +168,11 @@ class SynthesisEngine:
                 )
 
             print("HN-SEP 管线: 一次分离谐波/噪声...")
-            harmonic, noise = _hnsep_separate(wav, self._hnsep)
-            n_samples = len(wav)
+            harmonic, noise = hnsep_separate(wav, self._hnsep)
 
-            # ── 6a. breath/tension/voicing/brel/breh（原 HN-SEP 后处理） ──
-            if _need_hnsep_breath or _need_hnsep_tension or _need_hnsep_voicing \
-                    or _need_hnsep_brel or _need_hnsep_breh:
+            # ── 6a. breath/tension/voicing/brel/breh ──
+            #     直接操作已分离的分量，不再内部重新分离
+            if _need_hnsep_legacy:
                 _pad_b = _pad(frag.breath, front_dh, tail_dh)
                 _pad_t = _pad(frag.tension, front_dh, tail_dh)
                 _pad_v = _pad(frag.voicing, front_dh, tail_dh)
@@ -183,12 +180,10 @@ class SynthesisEngine:
                 _pad_brel = _pad(frag.brel, front_dh, tail_dh)
                 _pad_breh = _pad(frag.breh, front_dh, tail_dh)
 
-                wav = apply_hnsep_postprocess(
-                    wav, _pad_b, _pad_t, _pad_v, frag.sample_rate, self._hnsep,
+                harmonic, noise = apply_hnsep_postprocess_components(
+                    harmonic, noise, _pad_b, _pad_t, _pad_v, frag.sample_rate,
                     f0_curve=_pad_f0, brel_array=_pad_brel, breh_array=_pad_breh,
                 )
-                # 重新分离（因为 apply_hnsep_postprocess 内部已重新混合）
-                harmonic, noise = _hnsep_separate(wav, self._hnsep)
 
             # ── 6b. 谐波压缩（hcmp）— 仅作用于谐波 ──
             if _need_hnsep_hcmp:

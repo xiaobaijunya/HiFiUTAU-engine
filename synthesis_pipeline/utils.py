@@ -78,3 +78,14 @@ def interp_to_len(arr: np.ndarray, target_len: int) -> np.ndarray:
     new_idx = np.linspace(0, len(arr) - 1, target_len)
     return interp1d(old_idx, arr, kind='linear',
                     bounds_error=False, fill_value='extrapolate')(new_idx)
+
+
+def hnsep_separate(wav: np.ndarray, hnsep_model):
+    """统一分离谐波/噪声，支持 ONNX session 和 PyTorch 模型。
+
+    集中管理，避免各模块重复实现。
+    """
+    if hasattr(hnsep_model, 'separate'):
+        return hnsep_model.separate(wav)
+    from tools.hnsep_onnx import hnsep_separate as _onnx_sep
+    return _onnx_sep(wav, hnsep_model)

@@ -15,13 +15,7 @@ warmth = 0：直通
 import numpy as np
 import librosa
 
-
-def _hnsep_separate(wav: np.ndarray, hnsep_model) -> tuple:
-    """统一分离谐波/噪声，支持 ONNX session 和 PyTorch 模型。"""
-    if hasattr(hnsep_model, 'separate'):
-        return hnsep_model.separate(wav)
-    from tools.hnsep_onnx import hnsep_separate as _onnx_sep
-    return _onnx_sep(wav, hnsep_model)
+from synthesis_pipeline.utils import hnsep_separate
 
 
 def _soft_knee_compressor(signal: np.ndarray,
@@ -31,13 +25,15 @@ def _soft_knee_compressor(signal: np.ndarray,
                           attack_ms: float = 5.0,
                           release_ms: float = 60.0,
                           sr: int = 44100) -> np.ndarray:
-    """RMS 软膝压缩器。
+    """RMS 软膝压缩器（向量化版本）。
+
+    用卷积代替 Python 循环计算 RMS 包络，np.where 向量化增益曲线。
 
     Args:
         signal:       输入音频 (samples,)
-        threshold_db: 阈值 (dB)，超过此值开始压缩
-        ratio:        压缩比 (≥1)，2:1 意味着超阈值 2dB 输出 1dB
-        knee_db:      软膝宽度 (dB)，在阈值附近平滑过渡
+        threshold_db: 阈值 (dB)
+        ratio:        压缩比 (≥1)
+        knee_db:      软膝宽度 (dB)
         attack_ms:    启动时间 (ms)
         release_ms:   释放时间 (ms)
         sr:           采样率
@@ -49,53 +45,50 @@ def _soft_knee_compressor(signal: np.ndarray,
     if n == 0:
         return signal
 
-    # RMS 窗口 ≈ 10ms
+    x = signal.astype(np.float64)
+
+    # ── RMS 包络（卷积法，O(n) 向量化） ──
     rms_win = max(1, int(sr * 0.01))
-    # 计算 RMS 包络
-    rms = np.zeros(n, dtype=np.float64)
-    for i in range(n):
-        start = max(0, i - rms_win // 2)
-        end = min(n, i + rms_win // 2)
-        seg = signal[start:end]
-        rms[i] = np.sqrt(np.mean(seg.astype(np.float64) ** 2)) if len(seg) > 0 else 0.0
+    kernel = np.ones(rms_win, dtype=np.float64) / rms_win
+    # 边界处理：使用 'same' 模式 + 边界扩展保证 RMS 窗口完整
+    x_pad = np.pad(x ** 2, rms_win // 2, mode='reflect')
+    rms_sq = np.convolve(x_pad, kernel, mode='same')
+    rms = np.sqrt(np.clip(rms_sq[rms_win // 2:rms_win // 2 + n], 0.0, None))
 
     rms_db = 20.0 * np.log10(np.clip(rms, 1e-12, None))
 
-    # 软膝压缩曲线
-    # 在 threshold 附近 smooth 过渡
-    gain_db = np.zeros(n, dtype=np.float64)
-    for i in range(n):
-        db = rms_db[i]
-        if db < threshold_db - knee_db / 2:
-            g = 0.0  # 未到阈值，不压缩
-        elif db > threshold_db + knee_db / 2:
-            # 硬压缩区
-            overshoot = db - threshold_db
-            g = -overshoot * (1.0 - 1.0 / ratio)
-        else:
-            # 软膝过渡区
-            overshoot = db - threshold_db + knee_db / 2
-            g = (overshoot ** 2) / (2 * knee_db) * (1.0 - 1.0 / ratio)
-        gain_db[i] = g
+    # ── 软膝增益曲线（向量化 np.where） ──
+    overshoot = rms_db - threshold_db
+    half_knee = knee_db / 2.0
 
-    # 平滑（attack / release 一阶低通）
+    mask_low = overshoot < -half_knee          # 不压缩
+    mask_high = overshoot > half_knee           # 硬压缩
+    mask_knee = ~(mask_low | mask_high)         # 软膝过渡
+
+    gain_db = np.zeros(n, dtype=np.float64)
+    # 硬压缩区
+    gain_db[mask_high] = -overshoot[mask_high] * (1.0 - 1.0 / ratio)
+    # 软膝过渡区
+    knee_os = overshoot[mask_knee] + half_knee
+    gain_db[mask_knee] = (knee_os ** 2) / (2.0 * knee_db) * (1.0 - 1.0 / ratio)
+    # mask_low 保持 0
+
+    # ── attack/release 平滑（一阶 IIR，时序依赖，保留逐样本循环） ──
     gain_linear = 10.0 ** (gain_db / 20.0)
 
-    alpha_attack = np.exp(-1.0 / (sr * attack_ms / 1000.0)) if attack_ms > 0 else 0
-    alpha_release = np.exp(-1.0 / (sr * release_ms / 1000.0)) if release_ms > 0 else 0
+    alpha_a = np.exp(-1.0 / (sr * attack_ms / 1000.0)) if attack_ms > 0 else 0.0
+    alpha_r = np.exp(-1.0 / (sr * release_ms / 1000.0)) if release_ms > 0 else 0.0
 
-    smoothed = np.ones(n, dtype=np.float64)
+    smoothed = np.empty(n, dtype=np.float64)
+    smoothed[0] = 1.0
     for i in range(1, n):
-        target = gain_linear[i]
-        if target < smoothed[i - 1]:
-            # 压缩（增益减小）→ attack
-            smoothed[i] = alpha_attack * smoothed[i - 1] + (1.0 - alpha_attack) * target
+        t = gain_linear[i]
+        if t < smoothed[i - 1]:
+            smoothed[i] = alpha_a * smoothed[i - 1] + (1.0 - alpha_a) * t
         else:
-            # 释放（增益增大）→ release
-            smoothed[i] = alpha_release * smoothed[i - 1] + (1.0 - alpha_release) * target
+            smoothed[i] = alpha_r * smoothed[i - 1] + (1.0 - alpha_r) * t
 
-    # 应用增益
-    return (signal.astype(np.float64) * smoothed).astype(np.float32)
+    return (x * smoothed).astype(np.float32)
 
 
 def _apply_saturation(signal: np.ndarray,
@@ -213,7 +206,7 @@ def apply_warmth_eq(waveform: np.ndarray,
     noise = None
     if hnsep_session is not None:
         try:
-            harmonic, noise = _hnsep_separate(waveform, hnsep_session)
+            harmonic, noise = hnsep_separate(waveform, hnsep_session)
             harmonic = harmonic.astype(np.float64)
             noise = noise.astype(np.float64)
             x = harmonic  # 只处理谐波部分
@@ -297,7 +290,7 @@ def apply_harmonic_compression(waveform: np.ndarray,
     noise = None
     if hnsep_session is not None:
         try:
-            harmonic, noise = _hnsep_separate(waveform, hnsep_session)
+            harmonic, noise = hnsep_separate(waveform, hnsep_session)
             harmonic = harmonic.astype(np.float64)
             noise = noise.astype(np.float64)
             x = harmonic

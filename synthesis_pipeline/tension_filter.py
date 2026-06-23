@@ -307,6 +307,12 @@ def apply_dynamic_lowcut(waveform: np.ndarray,
     return filtered
 
 
+# ── 缓存 Butterworth 分频器系数（crossover=2000Hz, sr=44100） ──
+# 避免 apply_breath_band_gain 每次调用重新计算滤波器
+_BAND_SOS_LOW = _signal.butter(4, 2000.0, btype='low', fs=44100, output='sos')
+_BAND_SOS_HIGH = _signal.butter(4, 2000.0, btype='high', fs=44100, output='sos')
+
+
 def apply_breath_band_gain(waveform: np.ndarray,
                             low_gain: np.ndarray,
                             high_gain: np.ndarray,
@@ -333,8 +339,12 @@ def apply_breath_band_gain(waveform: np.ndarray,
     if np.max(np.abs(low_gain - 1.0)) < 0.01 and np.max(np.abs(high_gain - 1.0)) < 0.01:
         return waveform
 
-    sos_low = _signal.butter(4, crossover_hz, btype='low', fs=sr, output='sos')
-    sos_high = _signal.butter(4, crossover_hz, btype='high', fs=sr, output='sos')
+    # 使用缓存的滤波器系数（默认 2000Hz/44100），非标准参数时才重新计算
+    if abs(crossover_hz - 2000.0) < 0.1 and sr == 44100:
+        sos_low, sos_high = _BAND_SOS_LOW, _BAND_SOS_HIGH
+    else:
+        sos_low = _signal.butter(4, crossover_hz, btype='low', fs=sr, output='sos')
+        sos_high = _signal.butter(4, crossover_hz, btype='high', fs=sr, output='sos')
 
     low = _signal.sosfilt(sos_low, waveform)
     high = _signal.sosfilt(sos_high, waveform)
