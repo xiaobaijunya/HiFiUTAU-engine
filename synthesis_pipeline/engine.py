@@ -186,20 +186,20 @@ class SynthesisEngine:
                     f0_curve=_pad_f0, brel_array=_pad_brel, breh_array=_pad_breh,
                 )
 
-            # ── 6b. 谐波压缩（hcmp）— 仅作用于谐波 ──
-            if _need_hnsep_hcmp:
-                hcmp_val = float(np.mean(frag.hcmp))
-                print(f"  谐波压缩: hcmp={hcmp_val:.1f}")
-                harmonic = apply_harmonic_compression(
-                    harmonic, hcmp_val, frag.sample_rate, hnsep_session=None
-                )
-
-            # ── 6c. 温暖度 EQ — 仅作用于谐波 ──
+            # ── 6b. 温暖度 EQ — 仅作用于谐波 ──
             if _need_hnsep_warm:
                 warm_val = float(np.mean(frag.warm))
                 print(f"  温暖度 EQ: warmth={warm_val:.1f}")
                 harmonic = apply_warmth_eq(
                     harmonic, warm_val, frag.sample_rate, hnsep_session=None
+                )
+
+            # ── 6c. 谐波压缩（hcmp）— 放在处理链最后，控制最终谐波音量 ──
+            if _need_hnsep_hcmp:
+                hcmp_val = float(np.mean(frag.hcmp))
+                print(f"  谐波压缩: hcmp={hcmp_val:.1f}")
+                harmonic = apply_harmonic_compression(
+                    harmonic, hcmp_val, frag.sample_rate, hnsep_session=None
                 )
 
             # ── 6d. 混合 ──
