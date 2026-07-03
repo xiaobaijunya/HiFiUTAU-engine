@@ -42,50 +42,6 @@ class Fragment:
                 return np.array(val, dtype=np.float32)
         return np.array([], dtype=np.float32)
 
-    # ─── 参数范围计算 ───
-    def _get_param_range(self, phoneme_idx: int) -> tuple:
-        total_params = len(self.gen) if len(self.gen) > 0 else 1
-        cum_frames = 0.0
-        for i in range(phoneme_idx):
-            mel = self.phoneme_list[i].get('mel')
-            if mel is not None:
-                cum_frames += mel.shape[1]
-            # 减去前一个音素与本音素的重叠帧（即本音素开头被前音素覆盖的部分）
-            if i > 0:
-                env = self.phoneme_list[i]['envelope']
-                p0_x, p1_x = env['p0']['x'], env['p1']['x']
-                if p1_x < 0:
-                    overlap_ms = abs(p0_x) - abs(p1_x)
-                else:
-                    overlap_ms = abs(p1_x) + abs(p0_x)
-                cum_frames -= overlap_ms / self.ms_per_frame
-
-        # 也减去当前音素与前一个音素的重叠（上一轮循环没处理的最后一段重叠）
-        if phoneme_idx > 0:
-            env = self.phoneme_list[phoneme_idx]['envelope']
-            p0_x, p1_x = env['p0']['x'], env['p1']['x']
-            if p1_x < 0:
-                overlap_ms = abs(p0_x) - abs(p1_x)
-            else:
-                overlap_ms = abs(p1_x) + abs(p0_x)
-            cum_frames -= overlap_ms / self.ms_per_frame
-
-        cur_mel = self.phoneme_list[phoneme_idx].get('mel')
-        cur_frames = cur_mel.shape[1] if cur_mel is not None else 0
-
-        start_frame = int(round(max(0, cum_frames)))
-        end_frame = int(round(min(total_params, cum_frames + cur_frames)))
-        if end_frame <= start_frame:
-            end_frame = start_frame + 1
-        return start_frame, end_frame
-
-    def _get_avg_param(self, param_array: np.ndarray, phoneme_idx: int,
-                        default: float = 0.0) -> float:
-        if len(param_array) == 0:
-            return default
-        s, e = self._get_param_range(phoneme_idx)
-        return float(np.mean(param_array[s:e]))
-
     # ─── 单音素处理（供并行调用） ───
     def _process_single_phoneme(self, i: int) -> int:
         """处理单个音素：读取音频 → mel 转换 → 时间拉伸。返回音素索引。"""
