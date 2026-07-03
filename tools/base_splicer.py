@@ -57,6 +57,11 @@ class BaseSplicer:
 
     # ─── 共用工具方法 ──────────────────────────────────────
 
+    @staticmethod
+    def _round_away_from_zero(x: float) -> int:
+        """向正无穷舍入（类似 C# MidpointRounding.AwayFromZero）。"""
+        return int(x + 0.5) if x >= 0 else int(x - 0.5)
+
     def _resample_mel(self, mel: np.ndarray, target_frames: int) -> np.ndarray:
         """将 mel 从当前帧数用 cubic 插值重采样到 target_frames。"""
         if mel.shape[1] == target_frames:
@@ -66,19 +71,28 @@ class BaseSplicer:
         return interp1d(old, mel, axis=1, kind='linear',
                         bounds_error=False, fill_value='extrapolate')(new)
 
-    def _encode_one(self, mel: np.ndarray, ratio: float) -> np.ndarray:
+    def _encode_one(self, mel: np.ndarray, ratio: float,
+                    target_model_frames: int | None = None) -> np.ndarray:
         """单个音素的 mel → 编码 → 隐特征。
 
+        如果指定 target_model_frames，强制输出特征对应精确的模型帧数
+        （类似 OpenUtau EncodeOne 的 targetModelFrames 参数），
+        避免 int(mel_frames * ratio) 截断导致的音素位置偏移。
+
         Args:
-            mel:   (n_mels, frames) 原始 mel (hop=256)
-            ratio: hop_length / model_hop
+            mel:                  (n_mels, frames) 原始 mel (hop=256)
+            ratio:                hop_length / model_hop
+            target_model_frames:  目标模型帧数（可选），精确控制输出长度
 
         Returns:
             feat:  (1, 128, T_feat) 隐特征
         """
         if mel.shape[1] == 0:
             return None
-        target = max(1, int(mel.shape[1] * ratio))
+        if target_model_frames is not None:
+            target = max(1, target_model_frames)
+        else:
+            target = max(1, int(mel.shape[1] * ratio))
         mel_512 = self._resample_mel(mel, target)
         enc_pad = self.encoder_pad_frames
         if enc_pad > 0:
@@ -90,63 +104,135 @@ class BaseSplicer:
             feat = feat[:, :, trim_feat:]
         return feat
 
-    # ─── 拼接 + 合成流程 ──────────────────────────────────
-
-    def process(self, phoneme_list, ms_per_frame_hop, hop_length):
-        """
-        对音素列表做隐空间拼接，返回拼接后的特征数组。
+    def _encode_blank(self, model_frames: int, ratio: float) -> np.ndarray | None:
+        """编码空白 mel 用于音素间隙填充（类似 OpenUtau EncodeBlank）。
 
         Args:
-            phoneme_list: list[dict]
-                每个 dict 含 'mel' (n_mels, frames, hop=256), 'envelope', 等。
-            ms_per_frame_hop: float, hop=256 时的 ms/帧
+            model_frames:  目标模型帧数（hop=512）
+            ratio:         hop_length / model_hop
+
+        Returns:
+            feat:  (1, 128, T_feat) 空白隐特征，或 None
+        """
+        if model_frames <= 0:
+            return None
+        feature_frames = max(1, int(np.ceil(model_frames / ratio)))
+        blank_mel = np.full((self.num_mels, feature_frames),
+                            np.log(1e-5), dtype=np.float32)
+        return self._encode_one(blank_mel, ratio,
+                                target_model_frames=model_frames)
+
+    # ─── 绝对帧定位 ────────────────────────────────────────
+
+    @staticmethod
+    def _calc_model_frames(phoneme_list, ms_per_model_frame: float):
+        """计算每个音素在模型帧空间中的绝对帧位置。
+
+        使用与 FragmentMel.calc_positions_and_ratios_ms 完全相同的公式:
+          s[0] = 0
+          s[i] = s[i-1] + prev_len - curr_ov
+        其中 prev_len = prev_envelope[p4].x - prev_envelope[p0].x
+             curr_ov  = curr_envelope[p1].x - curr_envelope[p0].x
+        s[i] 是第 i 个音素 envelope p0 点在时间轴上的位置（相对于第一个音素的 p0）。
+
+        模型帧定位:
+          start_ms[i] = s[i]                     (p0 的时间位置)
+          end_ms[i]   = s[i] + (p4_x - p0_x)     (p4 的时间位置)
+
+        结果写回每个 dict 的:
+          model_start_frame, model_end_frame, model_frames
+        """
+        n = len(phoneme_list)
+        if n == 0:
+            return
+
+        # ---- 第 1 步: 计算每个音素 p0 点在时间轴上的绝对位置 ----
+        # s[i] = position of envelope p0 in timeline (相对第一个音素 p0)
+        p0_positions = [0.0]  # ms
+        for i in range(1, n):
+            prev_env = phoneme_list[i - 1]['envelope']
+            curr_env = phoneme_list[i]['envelope']
+            prev_len = prev_env['p4']['x'] - prev_env['p0']['x']
+            ov = curr_env['p1']['x'] - curr_env['p0']['x']
+            s = p0_positions[-1] + prev_len - ov
+            p0_positions.append(s)
+
+        # ---- 第 2 步: 转换为模型帧位置 ----
+        for i, info in enumerate(phoneme_list):
+            env = info['envelope']
+            p0_x = env['p0']['x']
+            p4_x = env['p4']['x']
+
+            # p0 和 p4 在时间轴上的绝对位置
+            start_ms = p0_positions[i]
+            end_ms = start_ms + (p4_x - p0_x)
+
+            # round-away-from-zero 转换到模型帧空间
+            model_start = max(0, BaseSplicer._round_away_from_zero(
+                start_ms / ms_per_model_frame))
+            model_end = max(model_start + 1, BaseSplicer._round_away_from_zero(
+                end_ms / ms_per_model_frame))
+            model_frames = model_end - model_start
+
+            info['model_start_frame'] = model_start
+            info['model_end_frame'] = model_end
+            info['model_frames'] = model_frames
+
+    # ─── 拼接 + 合成流程 ──────────────────────────────────
+
+    def _process_absolute(self, phoneme_list, ms_per_frame_hop, hop_length):
+        """基于绝对帧位置的隐空间拼接（类似 OpenUtau ProcessFeatureSplice）。
+
+        与旧 process() 的区别:
+          1. 先计算每个音素的绝对模型帧位置 (_calc_model_frames)
+          2. 用 target_model_frames 传递给 _encode_one，精确控制编码长度
+          3. 显式填充音素间的间隙帧 (EncodeBlank)
+          4. 基于绝对帧位置处理重叠
+
+        Args:
+            phoneme_list:    list[dict]，每个含 'mel', 'envelope' 等
+            ms_per_frame_hop: float, hop 下的 ms/帧
+            hop_length:       int, 特征提取 hop
 
         Returns:
             combined_feat:     np.ndarray (1, 128, T_feat)
             total_mel_frames:  int, 拼接后对应 hop=512 的 mel 帧数
         """
-        hop_model = self.model_hop  # 512
-        ratio = hop_length / hop_model
+        # ---- 第 0 步: 计算绝对模型帧位置 ----
+        self._calc_model_frames(phoneme_list, self.ms_per_frame_model)
 
-        # ---- 第 1 步: 每个音素 encode ----
-        feats = []
-        feat_lens_hop512 = []
-
-        for info in phoneme_list:
-            feat = self._encode_one(info['mel'], ratio)
-            feats.append(feat)
-            if feat is not None:
-                feat_lens_hop512.append(feat.shape[2] // self.feat_upsample)
-            else:
-                feat_lens_hop512.append(0)
-
-        # ---- 第 2 步: 在 feat 空间交叉淡化拼接 ----
+        ratio = hop_length / self.model_hop
         segments = []
+        previous_end_frame = 0
 
-        for i in range(len(feats)):
-            feat = feats[i]
+        for i, info in enumerate(phoneme_list):
+            feat = self._encode_one(
+                info['mel'], ratio,
+                target_model_frames=info.get('model_frames'))
             if feat is None:
                 continue
 
-            if i == 0 or not segments:
+            model_start = info['model_start_frame']
+            model_end = info['model_end_frame']
+
+            # ---- 间隙填充 ----
+            gap_frames = max(0, model_start - previous_end_frame)
+            if gap_frames > 0:
+                gap = self._encode_blank(gap_frames, ratio)
+                if gap is not None:
+                    segments.append(gap)
+
+            # ---- 重叠帧数（基于绝对帧位置） ----
+            overlap_frames = max(0, previous_end_frame - model_start)
+            previous_end_frame = max(previous_end_frame, model_end)
+
+            if not segments:
                 segments.append(feat)
                 continue
 
-            # 计算 overlap
-            info = phoneme_list[i]
-            p0_x = info['envelope']['p0']['x']
-            p1_x = info['envelope']['p1']['x']
-            if p1_x < 0:
-                overlap_ms = abs(p0_x) - abs(p1_x)
-            else:
-                overlap_ms = abs(p1_x) + abs(p0_x)
-
-            overlap_frames_h512 = int(overlap_ms / self.ms_per_frame_model)
-            overlap_feat = overlap_frames_h512 * self.feat_upsample
-
-            last_feat = segments[-1]
-            overlap_feat = min(overlap_feat, last_feat.shape[2], feat.shape[2])
-
+            overlap_feat = overlap_frames * self.feat_upsample
+            overlap_feat = min(overlap_feat,
+                               segments[-1].shape[2], feat.shape[2])
             if overlap_feat <= 0:
                 segments.append(feat)
                 continue
@@ -155,8 +241,9 @@ class BaseSplicer:
             fade_in  = np.linspace(0, 1, overlap_feat).reshape(1, 1, -1)
             fade_out = np.linspace(1, 0, overlap_feat).reshape(1, 1, -1)
 
-            tail  = last_feat[:, :, -overlap_feat:]
-            body  = last_feat[:, :, :-overlap_feat]
+            last  = segments[-1]
+            tail  = last[:, :, -overlap_feat:]
+            body  = last[:, :, :-overlap_feat]
             head  = feat[:, :, :overlap_feat]
             body2 = feat[:, :, overlap_feat:]
 
@@ -220,8 +307,8 @@ class BaseSplicer:
 
     # ------------------------------------------------------------------
     def splice_and_synthesize(self, phoneme_list, ms_per_frame_hop, hop_length, f0_np):
-        """便捷方法: process + synthesize 一步完成。"""
-        feat, _ = self.process(phoneme_list, ms_per_frame_hop, hop_length)
+        """便捷方法: _process_absolute + synthesize 一步完成。"""
+        feat, _ = self._process_absolute(phoneme_list, ms_per_frame_hop, hop_length)
         return self.synthesize(feat, f0_np)
 
     # ------------------------------------------------------------------

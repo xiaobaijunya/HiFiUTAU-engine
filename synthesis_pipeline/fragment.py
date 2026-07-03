@@ -128,10 +128,6 @@ class Fragment:
         else:
             end_sample = int(round((offset_ms + abs(cutoff_ms)) / 1000 * sr))
 
-        # p0 往左拉 → 音频起点提前几帧，给插值留余量
-        if pre_to_left_ms < 0:
-            start_sample = max(0, start_sample - 12 * base_hop)  # 4帧 hop=44
-
         start_sample = max(0, min(start_sample, len(audio)))
         consonant_sample = max(start_sample, min(consonant_sample, len(audio)))
         end_sample = max(consonant_sample, min(end_sample, len(audio)))
@@ -248,8 +244,7 @@ class Fragment:
         # ── 左侧裁剪/补空白（基于包络最左边界） ──
         # pre_to_left_ms > 0: 左边界在音频起点之后 → 裁剪前面多余帧
         # pre_to_left_ms < 0: 左边界在音频起点之前 → 前面补空白帧
-        #                      注意：音频提取已提前 4 帧，空白后紧接真实音频，
-        #                      避免 cubic 插值时空白直接与辅音开头混合导致能量被拉低
+        #                      空白后紧接真实音频，用淡入过渡避免 HiFi-GAN 解码硬切换噪声
         if pre_to_left_ms > 0:
             left_cut_frames = int(pre_to_left_ms / self.ms_per_frame)
             if left_cut_frames < mel_out.shape[1]:
@@ -275,15 +270,6 @@ class Fragment:
                     )
             mel_out = np.concatenate([blank, mel_out], axis=1)
             target_con_frames = target_con_frames + left_pad_frames
-
-            # 前音素尾部固定缩短 12 帧，与音频提取提前量抵消，保证时间线对齐
-            if i > 0:
-                prev_info = self.phoneme_list[i - 1]
-                prev_mel = prev_info.get('mel')
-                if prev_mel is not None and prev_mel.shape[1] > 12:
-                    prev_info['mel'] = prev_mel[:, :-12]
-                    prev_con = prev_info.get('consonant_frames', 0)
-                    prev_info['consonant_frames'] = max(0, prev_con - 12)
 
         # ── 首/尾音素淡入淡出已移至 engine.py 波形域统一处理 ──
 
