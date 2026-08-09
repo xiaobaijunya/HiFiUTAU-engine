@@ -14,20 +14,26 @@ class HiddenSplicer(BaseSplicer):
     """隐空间混合拼接器 — ONNX Runtime 版。"""
 
     def __init__(self, part1_onnx_path, part2_onnx_path, config_path,
-                 device='dml'):
+                 device='dml', infer_threads=1):
         """
         Args:
             part1_onnx_path: part1.onnx 路径 (mel → 隐特征)
             part2_onnx_path: part2.onnx 路径 (隐特征 + f0 → 波形)
             config_path:     config.json 路径
             device:          'dml' (DirectML) 或 'cpu'
+            infer_threads:   每个 session 的 intra_op 推理线程数（限制 CPU 占用）
         """
         super().__init__(config_path)
 
         providers = self._resolve_providers(device)
-        self.part1_session = onnxruntime.InferenceSession(part1_onnx_path, providers=providers)
-        self.part2_session = onnxruntime.InferenceSession(part2_onnx_path, providers=providers)
-        print(f'[HiddenSplicer] ONNX 模型已加载, providers={providers}')
+        so = onnxruntime.SessionOptions()
+        so.intra_op_num_threads = max(1, int(infer_threads))
+        self.part1_session = onnxruntime.InferenceSession(
+            part1_onnx_path, providers=providers, sess_options=so)
+        self.part2_session = onnxruntime.InferenceSession(
+            part2_onnx_path, providers=providers, sess_options=so)
+        print(f'[HiddenSplicer] ONNX 模型已加载, providers={providers}, '
+              f'intra_op_threads={so.intra_op_num_threads}')
 
     # ─── 抽象方法实现 ────────────────────────────────────────
 

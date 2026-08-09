@@ -17,7 +17,7 @@ class Fragment:
         self.ms_per_frame = (self.hop_length / self.sample_rate) * 1000
 
         self.Dynamic_hop = json_data['hop_size']
-        self.out_wav = json_data['out_wav']
+        self.out_wav = json_data.get('out_wav', '')
         self.wav_dur = json_data['wav_dur']
         self.phoneme_list = list(json_data['phoneme_list'].values())
 

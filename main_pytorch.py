@@ -13,6 +13,7 @@ import torch
 from tools.pytorch_splicer import PytorchHiddenSplicer
 from tools.hnsep_pytorch import PytorchHnsep
 from synthesis_pipeline import SynthesisEngine
+from synthesis_pipeline.engine import load_splicer_config
 from util.wav2mel import PitchAndTimeAdjustableMelSpectrogram
 
 
@@ -23,6 +24,7 @@ from util.wav2mel import PitchAndTimeAdjustableMelSpectrogram
 _pytorch_splicer: PytorchHiddenSplicer | None = None
 _pytorch_splicer_config: tuple | None = None
 _hnsep_model: PytorchHnsep | None = None
+_splicer_config = None
 
 
 def get_splicer(checkpoint_path: str, config_path: str,
@@ -46,6 +48,14 @@ def get_splicer(checkpoint_path: str, config_path: str,
 def get_hnsep_model() -> PytorchHnsep | None:
     """获取 HN-SEP 全局模型。"""
     return _hnsep_model
+
+
+def get_splicer_config():
+    """轻量 splicer 配置（不加载 PyTorch 模型），供 hnsep/post 阶段使用。"""
+    global _splicer_config
+    if _splicer_config is None:
+        _splicer_config = load_splicer_config(_resolve_config_path())
+    return _splicer_config
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -114,21 +124,10 @@ def _resolve_hnsep_paths(device: str):
     return model_path, config_path
 
 
-def preload_all(device: str = 'cuda', *,
-               compile_model: bool = False,
-               fp16: bool = False):
-    """服务器启动时预加载所有模型。
-
-    全部使用 PyTorch 推理（SplitGenerator + CascadedNet HN-SEP）。
-
-    Args:
-        device:        'cuda' 或 'cpu'
-        compile_model: 启用 torch.compile（需 PyTorch ≥2.0）
-        fp16:          启用 FP16 推理（仅 GPU 有效，吞吐量提升~40%）
-    """
-    global _hnsep_model
-
-    # ── PytorchHiddenSplicer（主合成模型） ──
+def preload_splicer(device: str = 'cuda', *,
+                    compile_model: bool = False,
+                    fp16: bool = False):
+    """预加载 PytorchHiddenSplicer（主合成模型）。"""
     ckpt = _resolve_ckpt_path()
     cfg = _resolve_config_path()
     print(f"[预加载] SplitGenerator checkpoint: {ckpt}")
@@ -136,7 +135,10 @@ def preload_all(device: str = 'cuda', *,
     print(f"[预加载] 优化: compile={compile_model}, fp16={fp16}")
     get_splicer(ckpt, cfg, device, compile_model=compile_model, fp16=fp16)
 
-    # ── HN-SEP PyTorch 模型 ──
+
+def preload_hnsep(device: str = 'cuda'):
+    """预加载 HN-SEP PyTorch 模型。"""
+    global _hnsep_model
     try:
         hnsep_ckpt, hnsep_cfg = _resolve_hnsep_paths(device)
         print(f"[预加载] HN-SEP PyTorch 模型: {hnsep_ckpt}")
@@ -145,6 +147,14 @@ def preload_all(device: str = 'cuda', *,
     except Exception as e:
         print(f"[警告] HN-SEP 预加载失败（不使用后处理）: {e}")
         _hnsep_model = None
+
+
+def preload_all(device: str = 'cuda', *,
+               compile_model: bool = False,
+               fp16: bool = False):
+    """预加载全部模型（splicer + hnsep）。"""
+    preload_splicer(device, compile_model=compile_model, fp16=fp16)
+    preload_hnsep(device)
 
     # ── 显示可用设备 ──
     if torch.cuda.is_available():
@@ -188,6 +198,52 @@ def synthesize_audio(json_data: dict, *, test: bool = False,
     mel_exc = PitchAndTimeAdjustableMelSpectrogram()
     engine = SynthesisEngine(splicer=splicer, hnsep_session=hnsep, mel_exc=mel_exc)
     return engine.synthesize(json_data, test=test, max_workers=max_workers)
+
+
+# ============================================================================
+# 分段合成（HiFiUTAU Local 渲染器）
+# ============================================================================
+
+
+def synthesize_mel(json_data: dict, *, max_workers: int = 4,
+                   test: bool = False, device: str = 'cuda'):
+    """分段1: mel 拼接 + 变调 + HiFi-GAN。返回 (wav_bytes, written=False)。"""
+    compile_model = os.environ.get('HIFIUTAU_ENGINE_COMPILE', '0') == '1'
+    fp16 = os.environ.get('HIFIUTAU_ENGINE_FP16', '0') == '1'
+
+    splicer = get_splicer(
+        _resolve_ckpt_path(), _resolve_config_path(), device,
+        compile_model=compile_model, fp16=fp16,
+    )
+    mel_exc = PitchAndTimeAdjustableMelSpectrogram()
+    engine = SynthesisEngine(splicer=splicer, hnsep_session=None, mel_exc=mel_exc)
+    return engine.synthesize_mel(
+        json_data, max_workers=max_workers, test=test)
+
+
+def synthesize_hnsep(wav_bytes: bytes, *, device: str = 'cuda'):
+    """分段2: HN-SEP 气声/谐波分离。返回 (harmonic, noise, False, False)。"""
+    hnsep = get_hnsep_model()
+    engine = SynthesisEngine(splicer=get_splicer_config(),
+                             hnsep_session=hnsep, mel_exc=None)
+    return engine.synthesize_hnsep(wav_bytes)
+
+
+def synthesize_post(json_data: dict, *, wav_bytes: bytes | None = None,
+                    harmonic_bytes: bytes | None = None,
+                    noise_bytes: bytes | None = None,
+                    max_workers: int = 4, test: bool = False,
+                    device: str = 'cuda'):
+    """分段3: 参数应用。返回 (final_bytes, written=False)。
+
+    纯 CPU 轻量计算（numpy/scipy 滤波），不加载任何模型。
+    """
+    engine = SynthesisEngine(splicer=get_splicer_config(),
+                             hnsep_session=None, mel_exc=None)
+    return engine.synthesize_post(
+        json_data, wav_bytes=wav_bytes,
+        harmonic_bytes=harmonic_bytes, noise_bytes=noise_bytes,
+        max_workers=max_workers, test=test)
 
 
 # ============================================================================

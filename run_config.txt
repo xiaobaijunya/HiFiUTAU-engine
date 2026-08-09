@@ -1,5 +1,15 @@
 # hifiutau-engine 运行配置
 # device: cpu 或 dml（强制，不可用则报错，不自动回退）
 device=cpu
-# DML 工作进程数量（仅在 device=dml 时有效）
-dml_workers=2
+# hifigan/旧完整合成 的并发 worker 数（CPU=线程池线程数，DML=进程池进程数）
+hifigan_workers=2
+# hnsep 的并发 worker 数（同上）
+hnsep_workers=1
+# 单个模型推理线程数（ONNX intra_op_num_threads；每个 worker 内用这么多线程推理）
+infer_threads=1
+# 说明:
+#   - CPU 模式：模型在主进程预加载，hifigan/hnsep 各自独立线程池限制并发，避免挤占资源
+#   - DML 模式：hifigan 池（/syn_mel+旧/synthesize）只加载 splicer，完整合成时懒加载 hnsep；
+#               hnsep 池只加载 hnsep
+#   - /syn_post 不进池，直接在进程内 CPU 计算
+#   - 推荐：infer_threads × hifigan_workers ≤ 物理核数（避免超线程过度订阅）
