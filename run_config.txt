@@ -1,6 +1,6 @@
 # hifiutau-engine 运行配置
 # device: cpu 或 dml（强制，不可用则报错，不自动回退）
-device=cpu
+device=dml
 # hifigan/旧完整合成 的并发 worker 数（CPU=线程池线程数，DML=进程池进程数）
 hifigan_workers=2
 # hnsep 的并发 worker 数（同上）
