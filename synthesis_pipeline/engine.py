@@ -24,7 +24,19 @@ def wav_bytes_to_samples(data: bytes) -> np.ndarray:
 
     注意：soundfile.read 返回 (data, samplerate) 元组，这里只取数据。
     """
-    return sf.read(io.BytesIO(data), dtype='float32', always_2d=False)[0]
+    if not data:
+        raise ValueError(
+            "wav_bytes_to_samples 收到空数据 (0 字节)。请检查传入的 wav/harmonic/noise 文件是否为空。")
+    try:
+        return sf.read(io.BytesIO(data), dtype='float32', always_2d=False)[0]
+    except sf.LibsndfileError as e:
+        # 打印文件头魔数，便于排查客户端实际发送的格式
+        magic = data[:16].hex(' ')
+        raise ValueError(
+            f"wav_bytes_to_samples 无法识别音频格式 (soundfile: {e})。"
+            f"字节数={len(data)}，文件头 hex={magic}。"
+            "这通常是传入的 wav/harmonic/noise 文件为空或不是有效的 WAV 文件。"
+        ) from e
 
 
 def samples_to_wav_bytes(wav: np.ndarray, sample_rate: int = 44100) -> bytes:
@@ -97,7 +109,7 @@ class SynthesisEngine:
         t_start = time.time()
 
         frag, is_mel = self._build_fragment(json_data)
-        frag, f0 = self._prepare_mel(frag, max_workers)
+        frag, f0 = self._prepare_mel(frag, max_workers, is_mel)
         wav = self._synthesize_hifigan(frag, f0, is_mel)
 
         return self._postprocess(wav, frag, t_start, test)
@@ -122,7 +134,7 @@ class SynthesisEngine:
         t_start = time.time()
 
         frag, is_mel = self._build_fragment(json_data)
-        frag, f0 = self._prepare_mel(frag, max_workers)
+        frag, f0 = self._prepare_mel(frag, max_workers, is_mel)
         wav = self._synthesize_hifigan(frag, f0, is_mel)
 
         if test:
@@ -216,8 +228,11 @@ class SynthesisEngine:
         else:
             return Fragment(json_data), False
 
-    def _prepare_mel(self, frag, max_workers: int):
-        """HiFi-GAN 之前的全部处理：切音频→mel→phtp→genc→VOL→F0。
+    def _prepare_mel(self, frag, max_workers: int, is_mel: bool = False):
+        """HiFi-GAN 之前的全部处理：切音频→mel→phtp→genc→VOL→包络→F0。
+
+        Args:
+            is_mel: True=mel 域拼接管线（包络已在 splicer 内应用，此处跳过）
 
         Returns:
             (frag, f0)
@@ -235,12 +250,18 @@ class SynthesisEngine:
         frag.adjust_volume_by_phtp()
         frag.apply_dynamic_gen_to_mels()
 
-        for info in frag.phoneme_list:
-            vol = info.get('Note_flags', {}).get('vol', 100)
-            gain = vol / 100.0
-            if abs(gain - 1.0) > 1e-6 and info.get('mel') is not None and info['mel'].shape[1] > 0:
-                info['mel'] = info['mel'] + np.log(gain)
-                print(f"  VOL: {info['phoneme_name']} x{gain:.4f}")
+        # ── 音量控制 ──
+        if is_mel:
+            # mel 域拼接管线：保持整体 vol 增益（包络由 splicer 按 h_points 处理）
+            for info in frag.phoneme_list:
+                vol = info.get('Note_flags', {}).get('vol', 100)
+                gain = vol / 100.0
+                if abs(gain - 1.0) > 1e-6 and info.get('mel') is not None and info['mel'].shape[1] > 0:
+                    info['mel'] = info['mel'] + np.log(gain)
+                    print(f"  VOL: {info['phoneme_name']} x{gain:.4f}")
+        else:
+            # model(feat) 管线：用音素包络做精细音量控制（不再单独叠加整体 vol）
+            self._apply_envelope_to_mels(frag)
 
         f0 = np.array(frag.pit, dtype=np.float32)
         target_hop = 512
@@ -248,6 +269,58 @@ class SynthesisEngine:
         f0 = resample_array(f0, frag.Dynamic_hop, target_hop)
         print(f"{len(f0)} 帧")
         return frag, f0
+
+    @staticmethod
+    def _apply_envelope_to_mels(frag):
+        """model(feat) 管线：按音素包络 (p1/p2/p3) 对 mel 做精细音量控制。
+
+        Fragment 已按 pre_to_left_ms = stretched_preutter + p0.x 裁剪/补空白帧，
+        因此 mel 帧 0 恰好对应包络坐标 p0.x，整段 mel 覆盖 [p0.x, p4.x]。
+        于是：包络坐标 = p0.x + frame * ms_per_frame。
+
+        分段规则（p0.y / p4.y 不参与）：
+            [p0, p1] : 恒定 p1.y        （不做由 p0.y 爬升的起音，避免与特征域交叉淡化叠减）
+            [p1, p2] : p1.y → p2.y 线性
+            [p2, p3] : p2.y → p3.y 线性
+            [p3, p4] : 恒定 p3.y        （忽略 p4.y，不做收尾淡出）
+        """
+        ms_per_frame = frag.ms_per_frame
+
+        def _ramp(x, x_a, x_b, y_a, y_b):
+            """在 [x_a, x_b] 上从 y_a 线性到 y_b（区间外自动钳到端点）。"""
+            span = x_b - x_a
+            if abs(span) < 1e-9:
+                return np.full_like(x, y_b)
+            t = np.clip((x - x_a) / span, 0.0, 1.0)
+            return y_a + (y_b - y_a) * t
+
+        for info in frag.phoneme_list:
+            mel = info.get('mel')
+            env = info.get('envelope')
+            if mel is None or mel.shape[1] == 0 or not env:
+                continue
+            if not all(k in env for k in ('p1', 'p2', 'p3')):
+                continue
+
+            p0x = env['p0']['x'] if 'p0' in env else env['p1']['x']
+            p1x, p2x, p3x = (float(env[k]['x']) for k in ('p1', 'p2', 'p3'))
+            y1 = float(env['p1']['y']) / 100.0
+            y2 = float(env['p2']['y']) / 100.0
+            y3 = float(env['p3']['y']) / 100.0
+
+            frame_x = p0x + np.arange(mel.shape[1], dtype=np.float64) * ms_per_frame
+            gain = np.where(
+                frame_x <= p1x, y1,
+                np.where(frame_x <= p2x, _ramp(frame_x, p1x, p2x, y1, y2),
+                         np.where(frame_x <= p3x, _ramp(frame_x, p2x, p3x, y2, y3),
+                                  y3)))
+            gain = np.maximum(gain, 1e-6)
+
+            if np.allclose(gain, 1.0, atol=1e-4):
+                continue
+            info['mel'] = mel + np.log(gain).astype(np.float32)
+            print(f"  包络: {info['phoneme_name']} "
+                  f"gain {gain.min():.3f}~{gain.max():.3f}")
 
     def _synthesize_hifigan(self, frag, f0: np.ndarray, is_mel_pipeline: bool):
         """HiFi-GAN 合成（feat 域拼接 或 mel 域能量叠加）。"""
