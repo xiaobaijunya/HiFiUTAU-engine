@@ -75,8 +75,8 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          # 后台启动服务
-          $job = Start-Job -ScriptBlock { python http_syn2_cpu.py }
+          # 后台启动服务（-OO 优化）
+          $job = Start-Job -ScriptBlock { python -OO http_syn2_cpu.py }
           # 等待服务就绪
           for ($i = 0; $i -lt 30; $i++) {
             try {
@@ -100,7 +100,8 @@ jobs:
       - name: Build with PyInstaller
         shell: pwsh
         run: |
-          pyinstaller build/hifiserver_dml.spec `
+          # spec 中已设置 optimize=2（等价于 -OO）；此处再用 -OO 启动打包器保持一致
+          python -OO -m PyInstaller build/hifiserver_dml.spec `
             --distpath dist `
             --workpath build-dml `
             --noconfirm

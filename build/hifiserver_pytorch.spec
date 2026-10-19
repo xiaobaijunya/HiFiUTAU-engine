@@ -73,6 +73,7 @@ a = Analysis(
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
+    optimize=2,  # 等价于 -OO：移除断言与文档字符串
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
@@ -80,6 +81,7 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    [('O', None, 'OPTION'), ('O', None, 'OPTION')],  # 运行时等效 -OO
     [],
     exclude_binaries=True,
     name='hifiserver_pytorch',

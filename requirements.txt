@@ -6,7 +6,7 @@ soundfile>=0.12
 librosa>=0.10
 numba>=0.58
 waitress>=3.0
-pyinstaller>=6.0
+pyinstaller>=6.6  # 6.6+ 的 Analysis(optimize=...) / --optimize 支持 -OO
 
 # onnxruntime: CPU 版全平台通用
 # Windows DML 版额外安装: pip install onnxruntime-directml

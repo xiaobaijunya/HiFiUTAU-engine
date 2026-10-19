@@ -104,13 +104,13 @@ dml_workers=2
 - **ONNX 模式（推荐，兼容性最好）**
 
   ```bash
-  python http_syn2_cpu.py
+  python -OO http_syn2_cpu.py
   ```
 
 - **PyTorch 模式（需要 GPU，性能更优）**
 
   ```bash
-  python http_syn2_pytorch.py
+  python -OO http_syn2_pytorch.py
   ```
 
 启动后服务器默认监听 `http://localhost:8000`。

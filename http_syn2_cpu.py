@@ -145,7 +145,9 @@ class StagePool:
             self._idle.add(i)
 
             ready_msg = parent_conn.recv()
-            assert ready_msg == 'READY', f"{tag} Worker #{i+1} 启动失败: {ready_msg}"
+            # 使用显式异常而非 assert：-OO 优化会移除 assert
+            if ready_msg != 'READY':
+                raise RuntimeError(f"{tag} Worker #{i+1} 启动失败: {ready_msg}")
             print(f"  [OK] {tag} Worker #{i+1} 就绪")
 
         print(f"\n 全部 {self._num_workers} 个 {tag} Worker 就绪，等待合成请求\n")

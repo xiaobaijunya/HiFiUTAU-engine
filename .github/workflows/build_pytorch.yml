@@ -107,8 +107,8 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          # 后台启动服务
-          python http_syn2_pytorch.py &
+          # 后台启动服务（-OO 优化）
+          python -OO http_syn2_pytorch.py &
           SERVER_PID=$!
           echo "Server PID: $SERVER_PID"
           # 等待服务就绪
@@ -129,7 +129,8 @@ jobs:
       - name: Build with PyInstaller
         shell: pwsh
         run: |
-          pyinstaller ${{ matrix.arch.spec }} `
+          # spec 中已设置 optimize=2（等价于 -OO）；此处再用 -OO 启动打包器保持一致
+          python -OO -m PyInstaller ${{ matrix.arch.spec }} `
             --distpath dist `
             --workpath build-${{ runner.os }} `
             --noconfirm
